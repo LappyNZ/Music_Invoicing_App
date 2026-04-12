@@ -1,0 +1,353 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Send Invoices</h2>
+
+<!-- Filters -->
+<form method="GET" class="row g-3 mb-4">
+  <div class="col-md-3">
+    <label class="form-label">Student</label>
+    <select name="student_id" class="form-select">
+      <option value="">All students</option>
+      {% for s in student_options %}
+        <option value="{{ s.id }}" {% if selected_student == s.id|string %}selected{% endif %}>
+          {{ s.name }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label">Start Date</label>
+    <input type="date" name="start_date" value="{{ start_date or '' }}" class="form-control">
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label">End Date</label>
+    <input type="date" name="end_date" value="{{ end_date or '' }}" class="form-control">
+  </div>
+  
+  <div class="col-md-2">
+    <label class="form-label">Term</label>
+    <select name="term" class="form-select">
+      <option value="" {{ 'selected' if not term else '' }}>All</option>
+      <option value="T1" {{ 'selected' if term == 'T1' else '' }}>Term 1 (Jan–Mar)</option>
+      <option value="T2" {{ 'selected' if term == 'T2' else '' }}>Term 2 (Apr–Jun)</option>
+      <option value="T3" {{ 'selected' if term == 'T3' else '' }}>Term 3 (Jul–Sep)</option>
+      <option value="T4" {{ 'selected' if term == 'T4' else '' }}>Term 4 (Oct–Dec)</option>
+    </select>
+  </div>
+
+  <div class="col-md-2">
+    <label class="form-label">Year</label>
+    <select name="year" class="form-select">
+      <option value="" {{ 'selected' if not year else '' }}>All</option>
+      {% for y in year_options %}
+        <option value="{{ y }}" {{ 'selected' if year == y else '' }}>{{ y }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="col-md-3">
+     <label class="form-label">Status</label>
+     <select name="status" class="form-select">
+       <option value="" {% if not status %}selected{% endif %}>All</option>
+       <option value="draft" {% if status == 'draft' %}selected{% endif %}>Draft (not sent)</option>
+       <option value="sent"  {% if status == 'sent' %}selected{% endif %}>Sent</option>
+       <option value="paid"  {% if status == 'paid' %}selected{% endif %}>Paid</option>
+     </select>
+   </div>
+
+  <div class="col-md-2 d-flex align-items-end">
+    <button type="submit" class="btn btn-primary w-100">Filter</button>
+  </div>
+</form>
+
+<!-- Bulk send form -->
+<form method="POST">
+  <input type="hidden" name="action" value="send">
+
+  <div class="d-flex justify-content-between align-items-center mb-2">
+    <div class="d-flex align-items-center gap-3">
+      <div class="form-check m-0">
+        <input class="form-check-input" type="checkbox" id="select-all">
+        <label class="form-check-label" for="select-all">Select all</label>
+      </div>
+      <div class="text-muted">
+        Selected: <span id="selected-count">0</span>
+      </div>
+    </div>
+    <button type="submit" id="send-btn" class="btn btn-success" name="confirm_send" value="1">
+      Send Selected Invoices
+    </button>
+  </div>
+
+  <div class="table-responsive">
+    <table class="table table-striped table-bordered align-middle" id="invoice-table">
+      <thead class="table-dark">
+        <tr>
+          <th style="width:40px;"></th>
+          <th>Invoice No.</th>
+          <th>Student</th>
+          <th>Parent</th>
+          <th>Period</th>
+          <th class="text-end">Total</th>
+          <th>Status</th>
+          <th class="text-center">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for inv in invoices %}
+        {% set invoice_number = "INV-" + inv.created_at[:4] + "-" + ("%04d"|format(inv.id)) %}
+        <tr>
+          <!-- Select -->
+          <td class="text-center">
+            <input type="checkbox" name="invoice_id" value="{{ inv.id }}" class="row-check">
+          </td>
+
+          <!-- Invoice No. -->
+          <td title="{{ invoice_number }}">{{ invoice_number }}</td>
+
+          <!-- Student / Parent -->
+          <td>{{ inv.student_name }}</td>
+          <td class="text-truncate" style="max-width: 220px;">{{ inv.parent_name or "—" }}</td>
+
+          <!-- Period -->
+          <td>
+            {{ fmt_date(inv.start_date) if inv.start_date else '' }}
+            →
+            {{ fmt_date(inv.end_date) if inv.end_date else '' }}
+          </td>
+
+          <!-- Total -->
+          <td class="text-end">${{ "%.2f"|format(inv.total or 0) }}</td>
+
+          <!-- Status (compact badge with tooltip; includes Created) -->
+          <td class="align-middle">
+            {% set st = (inv.status or ('sent' if inv.emailed_at else 'draft')) %}
+            {% set tt_lines = [] %}
+            {% if inv.created_at %}{% set _ = tt_lines.append('Created: ' ~ inv.created_at) %}{% endif %}
+            {% if st == 'paid' %}
+              {% if inv.paid_at %}{% set _ = tt_lines.append('Paid: ' ~ inv.paid_at) %}{% endif %}
+              {% if inv.paid_amount is not none %}{% set _ = tt_lines.append('Amount: $' ~ ("%.2f"|format(inv.paid_amount))) %}{% endif %}
+              {% if inv.paid_ref %}{% set _ = tt_lines.append('Ref: ' ~ inv.paid_ref) %}{% endif %}
+              {% if inv.emailed_at %}{% set _ = tt_lines.append('Sent: ' ~ inv.emailed_at) %}{% endif %}
+              {% if inv.emailed_to %}{% set _ = tt_lines.append('To: ' ~ inv.emailed_to) %}{% endif %}
+              {% set badge_class = 'bg-success' %}
+              {% set icon = 'bi-check-circle' %}
+              {% set label = 'Paid' %}
+            {% elif st == 'sent' %}
+              {% if inv.emailed_at %}{% set _ = tt_lines.append('Sent: ' ~ inv.emailed_at) %}{% endif %}
+              {% if inv.emailed_to %}{% set _ = tt_lines.append('To: ' ~ inv.emailed_to) %}{% endif %}
+              {% set badge_class = 'bg-info text-dark' %}
+              {% set icon = 'bi-envelope-check' %}
+              {% set label = 'Sent' %}
+            {% else %}
+              {% set _ = tt_lines.append('Not emailed yet') %}
+              {% set badge_class = 'bg-secondary' %}
+              {% set icon = 'bi-dash-circle' %}
+              {% set label = 'Draft' %}
+            {% endif %}
+
+            <span class="badge {{ badge_class }} d-inline-flex align-items-center gap-1"
+                  data-bs-toggle="tooltip"
+                  data-bs-placement="top"
+                  title="{{ tt_lines|join(' • ') }}">
+              <i class="bi {{ icon }}"></i> {{ label }}
+            </span>
+          </td>
+
+          <!-- Actions -->
+          <td class="text-center align-middle">
+            <div class="dropdown">
+              <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+                ⋯
+              </button>
+              <ul class="dropdown-menu dropdown-menu-end">
+                <li>
+                  <a class="dropdown-item" target="_blank" rel="noopener"
+                    href="{{ url_for('invoices_bp.regenerate_invoice_pdf', invoice_id=inv.id) }}">
+                    <i class="bi bi-file-earmark-pdf me-2"></i>View PDF
+                  </a>
+                </li>
+
+                {% if st != 'paid' %}
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <button type="button" class="dropdown-item"
+                          data-bs-toggle="modal"
+                          data-bs-target="#markPaidModal"
+                          data-invoice-id="{{ inv.id }}"
+                          data-return-student="{{ selected_student or '' }}"
+                          data-return-start="{{ start_date or '' }}"
+                          data-return-end="{{ end_date or '' }}"
+                          data-return-status="{{ status or '' }}"
+                          data-return-term="{{ term or '' }}"
+                          data-return-year="{{ year or '' }}">
+                    <i class="bi bi-cash-coin me-2"></i>Mark paid…
+                  </button>
+                </li>
+                {% endif %}
+
+                {% if st == 'draft' %}
+                <li>
+                  <form method="POST" action="{{ url_for('invoices_bp.update_invoice_status', invoice_id=inv.id) }}" class="px-3 py-1">
+                    <input type="hidden" name="status" value="sent">
+                    <input type="hidden" name="return_student_id" value="{{ selected_student or '' }}">
+                    <input type="hidden" name="return_start_date" value="{{ start_date or '' }}">
+                    <input type="hidden" name="return_end_date" value="{{ end_date or '' }}">
+                    <input type="hidden" name="return_status" value="{{ status or '' }}">
+                    <input type="hidden" name="return_term" value="{{ term or '' }}">
+                    <input type="hidden" name="return_year" value="{{ year or '' }}">
+                    <button class="btn btn-sm btn-outline-primary w-100" type="submit">
+                      <i class="bi bi-send-check me-1"></i> Mark sent
+                    </button>
+                  </form>
+                </li>
+                {% endif %}
+              </ul>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+
+        {% if invoices|length == 0 %}
+        <tr>
+          <td colspan="8" class="text-center text-muted">No invoices in this range.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</form>
+
+<!-- script to wire up tooltips + modal target -->
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  // Enable Bootstrap 5 tooltips
+  const tipTrigger = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+  tipTrigger.forEach(el => new bootstrap.Tooltip(el));
+
+  // Fill Mark Paid modal action & hidden fields
+  const markPaidModal = document.getElementById('markPaidModal');
+  if (markPaidModal) {
+    markPaidModal.addEventListener('show.bs.modal', function (event) {
+      const btn = event.relatedTarget;
+      const id = btn.getAttribute('data-invoice-id');
+      const form = document.getElementById('markPaidForm');
+      form.action = "{{ url_for('invoices_bp.update_invoice_status', invoice_id=0) }}".replace('0', id);
+
+      // persist filters
+      document.getElementById('retStudent').value = btn.getAttribute('data-return-student') || '';
+      document.getElementById('retStart').value   = btn.getAttribute('data-return-start') || '';
+      document.getElementById('retEnd').value     = btn.getAttribute('data-return-end') || '';
+      document.getElementById('retStatus').value  = btn.getAttribute('data-return-status') || '';
+      document.getElementById('retTerm').value    = btn.getAttribute('data-return-term') || '';
+      document.getElementById('retYear').value    = btn.getAttribute('data-return-year') || '';
+    });
+  }
+});
+</script>
+
+<!-- Small helper script for select all / counts / disable send -->
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const selectAll = document.getElementById("select-all");
+  const checks = Array.from(document.querySelectorAll(".row-check"));
+  const selectedCount = document.getElementById("selected-count");
+  const sendBtn = document.getElementById("send-btn");
+
+  function updateSelectAllVisual() {
+    if (!selectAll) return;
+    const total = checks.length;
+    const checked = checks.filter(c => c.checked).length;
+    selectAll.checked = checked === total && total > 0;
+    selectAll.indeterminate = checked > 0 && checked < total;
+  }
+
+  function updateCountAndButton() {
+    const count = checks.filter(c => c.checked).length;
+    selectedCount.textContent = count;
+    sendBtn.disabled = (count === 0);
+    updateSelectAllVisual();
+  }
+
+  // Initialize: compute count + visual state
+  updateCountAndButton();
+
+  // Select-all toggles all
+  if (selectAll) {
+    selectAll.addEventListener("change", () => {
+      checks.forEach(c => c.checked = selectAll.checked);
+      updateCountAndButton();
+    });
+  }
+
+  // Individual checkboxes update the count and maybe select-all state
+  checks.forEach(c => {
+    c.addEventListener("change", () => {
+      updateCountAndButton();
+    });
+  });
+
+  // Prevent accidental form submit when opening modals from within the table
+  document.querySelectorAll('.dropdown-item[data-bs-toggle="modal"]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Close any open dropdown menus first (smooth UX)
+      document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
+        const toggle = menu.closest('.dropdown')?.querySelector('[data-bs-toggle="dropdown"]');
+        if (toggle) bootstrap.Dropdown.getOrCreateInstance(toggle).hide();
+      });
+
+      const target = el.getAttribute('data-bs-target');
+      if (target) {
+        // Delay a tick so dropdown can finish hiding before showing modal
+        setTimeout(() => {
+          const modalEl = document.querySelector(target);
+          if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show(el);
+        }, 0);
+      }
+    });
+  });
+});
+</script>
+{% endblock %}
+
+{% block modals %}
+<div class="modal fade" id="markPaidModal" tabindex="-1" aria-labelledby="markPaidLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form method="POST" id="markPaidForm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="markPaidLabel">Mark invoice as paid</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body d-grid gap-2">
+          <input type="hidden" name="status" value="paid">
+          <input type="hidden" name="return_student_id" id="retStudent">
+          <input type="hidden" name="return_start_date" id="retStart">
+          <input type="hidden" name="return_end_date" id="retEnd">
+          <input type="hidden" name="return_status" id="retStatus">
+          <input type="hidden" name="return_term" id="retTerm">
+          <input type="hidden" name="return_year" id="retYear">
+
+          <label class="form-label m-0">Amount</label>
+          <input type="number" step="0.01" name="paid_amount" class="form-control" placeholder="e.g. 45.00">
+
+          <label class="form-label m-0">Reference</label>
+          <input type="text" name="paid_ref" class="form-control" placeholder="Bank statement ref">
+
+          <label class="form-label m-0">Paid at (optional)</label>
+          <input type="datetime-local" name="paid_at" class="form-control">
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-success">Save</button>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

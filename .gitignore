@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# VS Code local noise
+.vscode/*.log
+
+# Environment files
+.env
+.env.dev
+.env.prod
+!.env.example
+
+# Secrets and certs
+secrets/
+certs/
+
+# Data
+data/
+data-dev/
+
+# Generated files
+**/invoices_pdfs/
+*.pdf
+
+# OS noise
+.DS_Store
+Thumbs.db

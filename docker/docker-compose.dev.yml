@@ -1,0 +1,29 @@
+services:
+  music-invoice-dev:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: music-invoice-dev
+
+    env_file:
+      - ../.env.dev
+
+    environment:
+      - TZ=${TZ}
+
+    volumes:
+      - ../app:/app
+      - ../data-dev:/data-dev
+      - ../secrets:/secrets
+
+    ports:
+      - "8086:8000"
+      - "8096:8090"
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PORT}/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5

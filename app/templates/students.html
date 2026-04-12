@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Student Management</h2>
+<form method="POST" class="mb-3">
+  <input type="text" name="name" placeholder="Student's Name" required>
+  <input type="email" name="email" placeholder="Email" required>
+  <input type="text" name="parent" placeholder="Parent's Name">
+  <input type="text" name="phone" placeholder="Phone">
+  <input type="text" name="school" placeholder="e.g., Burnside High">
+  <button type="submit" class="btn btn-primary">Add Student</button>
+</form>
+
+<form method="get" class="filters" style="margin-bottom:1rem; display:flex; gap:.5rem; align-items:center;">
+  <label>School:
+    <select name="school" onchange="this.form.submit()">
+      <option value="">All schools</option>
+      {% for s in school_options %}
+        <option value="{{ s }}" {{ 'selected' if selected_school == s else '' }}>
+          {{ s if s else '— (blank) —' }}
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+
+  <input type="text" name="q" value="{{ q or '' }}" placeholder="Search name or email…">
+  <button type="submit">Apply</button>
+  <a href="{{ url_for('students_bp.students') }}">Reset</a>
+</form>
+
+<table class="table table-striped">
+  <tr><th>Student's Name</th><th>Email</th><th>Parent's Name</th><th>Phone</th><th>School</th><th>Actions</th></tr>
+  {% for student in students %}
+  <tr>
+    <td>{{ student.name }}</td>
+    <td>{{ student.email }}</td>
+    <td>{{ student.parent }}</td>
+    <td>{{ student.phone }}</td>
+    <td>{{ student.school }}</td>
+    <td>
+      <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editStudentModal{{ student.id }}">Edit</button>
+      <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteStudentModal{{ student.id }}">Delete</button>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
+
+{% block modals %}
+{% for student in students %}
+<!-- Edit Modal -->
+<div class="modal fade" id="editStudentModal{{ student.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <form method="POST"
+          action="{{ url_for('students_bp.edit_student', student_id=student.id) }}"
+          data-debug="edit-student-{{ student.id }}">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit Student</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="text" name="name" value="{{ student.name }}" class="form-control mb-2" required>
+          <input type="email" name="email" value="{{ student.email }}" class="form-control mb-2" required>
+          <input type="text" name="parent" value="{{ student.parent }}" class="form-control mb-2">
+          <input type="text" name="phone" value="{{ student.phone }}" class="form-control mb-2">
+          <input type="text" name="school" value="{{ student.school or '' }}" class="form-control mb-2">
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-success">Save Changes</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal fade" id="deleteStudentModal{{ student.id }}" tabindex="-1">
+  <div class="modal-dialog">
+    <form method="POST"
+          action="{{ url_for('students_bp.delete_student', student_id=student.id) }}"
+          data-debug="delete-student-{{ student.id }}">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title">Delete Student</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          Are you sure you want to delete <strong>{{ student.name }}</strong>?<br>
+          <small>(All their lessons will also be deleted.)</small>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-danger">Delete</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endfor %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('form[data-debug]').forEach(function(f) {
+    f.addEventListener('submit', function() {
+      console.log('Submitting', f.dataset.debug, '→', f.action);
+    });
+  });
+});
+</script>
+{% endblock %}

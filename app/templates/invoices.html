@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Create Invoices</h2>
+
+<form method="POST" id="invoice-form">
+  <!-- Student + dates -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-4">
+      <label class="form-label">Student</label>
+      <select name="student_id" class="form-select" required>
+        <option value="">Select Student</option>
+        {% for s in students %}
+          <option value="{{ s.id }}" {% if selected_student == s.id|string %}selected{% endif %}>
+            {{ s.name }} ({{ s.parent }})
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Start Date</label>
+      <input type="date" name="start_date" value="{{ start_date or '' }}" class="form-control" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">End Date</label>
+      <input type="date" name="end_date" value="{{ end_date or '' }}" class="form-control" required>
+    </div>
+    <div class="col-md-2 d-flex align-items-end">
+      <button type="submit" name="action" value="preview" class="btn btn-primary w-100">Preview</button>
+    </div>
+  </div>
+
+  {% if lessons %}
+  <!-- Lessons table -->
+  <div class="table-responsive mb-4">
+    <table class="table table-striped table-bordered align-middle" id="lessons-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Duration (min)</th>
+          <th>Rate ($/hr)</th>
+          <th class="text-end">Subtotal</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in lessons %}
+        <tr>
+          <td><input type="text" name="lesson_date_{{ loop.index }}" value="{{ l.date_str }}" class="form-control"></td>
+          <td><input type="number" name="lesson_duration_{{ loop.index }}" value="{{ l.duration }}" class="form-control duration"></td>
+          <td><input type="number" step="0.01" name="lesson_rate_{{ loop.index }}" value="{{ l.rate }}" class="form-control rate"></td>
+          <td><input type="number" step="0.01" name="lesson_subtotal_{{ loop.index }}" value="{{ l.subtotal }}" class="form-control subtotal text-end" readonly></td>
+          <td><button type="button" class="btn btn-sm btn-danger delete-row">Delete</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Extra items -->
+  <h5>Extra Items</h5>
+  <p class="text-muted">Optional — e.g. sheet music, exam fees</p>
+  <div id="extra-items" class="mb-3">
+    {% for i in range(1,6) %}
+      <div class="row g-2 mb-2 align-items-center extra-row">
+        <div class="col-md-8">
+          <input type="text" name="extra_desc_{{ i }}" placeholder="Description" class="form-control">
+        </div>
+        <div class="col-md-3">
+          <input type="number" step="0.01" name="extra_price_{{ i }}" placeholder="Price" class="form-control extra-price">
+        </div>
+        <div class="col-md-1">
+          <button type="button" class="btn btn-sm btn-danger delete-row">✕</button>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+
+  <input type="hidden" name="lesson_count" id="lesson_count" value="{{ lessons|length }}">
+  <input type="hidden" name="extra_count" id="extra_count" value="{{ extras|length if extras else 1 }}">
+  {% endif %}
+
+  <div class="d-flex justify-content-between align-items-center mt-4">
+    <h4>Total: $<span id="total-display">{{ "%.2f"|format(total) }}</span></h4>
+    <div>
+      <button type="submit" name="action" value="generate_pdf" class="btn btn-success">Generate PDF</button>
+    </div>
+  </div>
+</form>
+
+<!-- JS for delete + live total -->
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+  const form = document.getElementById("invoice-form");
+  const totalDisplay = document.getElementById("total-display");
+
+  function recalcTotal() {
+    let total = 0;
+    document.querySelectorAll("#lessons-table tbody tr").forEach(row => {
+      const dur = parseFloat(row.querySelector(".duration")?.value || 0);
+      const rate = parseFloat(row.querySelector(".rate")?.value || 0);
+      const subEl = row.querySelector(".subtotal");
+      const sub = (dur/60) * rate;
+      if (subEl) subEl.value = sub.toFixed(2);
+      total += sub;
+    });
+    document.querySelectorAll(".extra-price").forEach(inp => {
+      total += parseFloat(inp.value || 0);
+    });
+    if (totalDisplay) totalDisplay.textContent = total.toFixed(2);
+  }
+
+  function reindexRows() {
+    // Lessons
+    const lessonRows = Array.from(document.querySelectorAll("#lessons-table tbody tr"));
+    lessonRows.forEach((row, i) => {
+      const idx = i + 1;
+      row.querySelectorAll("input").forEach(inp => {
+        if (inp.name.startsWith("lesson_date_"))     inp.name = `lesson_date_${idx}`;
+        if (inp.name.startsWith("lesson_duration_")) inp.name = `lesson_duration_${idx}`;
+        if (inp.name.startsWith("lesson_rate_"))     inp.name = `lesson_rate_${idx}`;
+        if (inp.name.startsWith("lesson_subtotal_")) inp.name = `lesson_subtotal_${idx}`;
+      });
+    });
+    const lc = document.getElementById("lesson_count");
+    if (lc) lc.value = lessonRows.length;
+
+    // Extras
+    const extraRows = Array.from(document.querySelectorAll("#extra-items .extra-row"));
+    extraRows.forEach((row, i) => {
+      const idx = i + 1;
+      row.querySelectorAll("input").forEach(inp => {
+        if (inp.name.startsWith("extra_desc_"))  inp.name = `extra_desc_${idx}`;
+        if (inp.name.startsWith("extra_price_")) inp.name = `extra_price_${idx}`;
+      });
+    });
+    const ec = document.getElementById("extra_count");
+    if (ec) ec.value = extraRows.length;
+  }
+
+  // Live updates
+  document.addEventListener("input", (e) => {
+    if (e.target.matches(".duration, .rate, .extra-price")) recalcTotal();
+  });
+
+  document.addEventListener("click", (e) => {
+    if (e.target.classList.contains("delete-row")) {
+      e.preventDefault();
+      const tr = e.target.closest("tr");
+      const er = e.target.closest(".extra-row");
+      if (tr) tr.remove();
+      if (er) er.remove();
+      recalcTotal();
+    }
+  });
+
+  // Before submit: ensure contiguous names & counts, and recompute totals
+  form.addEventListener("submit", () => {
+    recalcTotal();
+    reindexRows();
+  });
+
+  recalcTotal();
+});
+</script>
+{% endblock %}

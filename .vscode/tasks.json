@@ -1,0 +1,60 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: up",
+      "type": "shell",
+      "command": "docker compose -f docker/docker-compose.dev.yml up --build",
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Dev: down",
+      "type": "shell",
+      "command": "docker compose -f docker/docker-compose.dev.yml down",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Dev: logs",
+      "type": "shell",
+      "command": "docker compose -f docker/docker-compose.dev.yml logs -f",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Dev: restart",
+      "type": "shell",
+      "command": "docker compose -f docker/docker-compose.dev.yml down && docker compose -f docker/docker-compose.dev.yml up --build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Prod compose: validate",
+      "type": "shell",
+      "command": "docker compose -f docker/docker-compose.prod.yml config",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Python: smoke import check",
+      "type": "shell",
+      "command": "C:\\PythonEnvs\\musicinvoiceenv\\Scripts\\python.exe -c \"import sys; sys.path.append('app'); import app; print('import ok')\"",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

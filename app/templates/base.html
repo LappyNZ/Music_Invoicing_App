@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Cello with Naomi</title>
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <!-- Your custom styles -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+</head>
+<body>
+  <div class="background"></div>
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container">
+      <a class="navbar-brand d-flex align-items-center" href="/">
+        <img src="{{ url_for('static', filename='logo_Small.png') }}" 
+       alt="Cello with Naomi Logo" 
+       height="40" 
+       class="me-2">
+        <span>Cello with Naomi</span>
+      </a>
+      <div>
+        <a class="nav-link d-inline text-white" href="{{ url_for('students_bp.students') }}">Students</a>
+        <a class="nav-link d-inline text-white" href="{{ url_for('lessons_bp.lessons') }}">Lessons</a>
+        <a class="nav-link d-inline text-white" href="{{ url_for('invoices_bp.invoices') }}">Create</a>
+        <a class="nav-link d-inline text-white" href="{{ url_for('invoices_bp.invoice_list') }}">View</a>
+      </div>
+    </div>
+  </nav>
+
+  <div class="container mt-3">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+          {{ message }}
+          <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+</div>
+
+  <!-- Page content -->
+  <div class="container mt-4">
+    <div class="glass p-4 rounded shadow">
+      {% block content %}{% endblock %}
+    </div>
+    {% block modals %}{% endblock %}
+  </div>
+
+  <!-- Bootstrap JavaScript bundle (required for modals, dropdowns, etc.) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.addEventListener('shown.bs.modal', function (event) {
+      var modal = event.target;
+      var input = modal.querySelector('input, select, textarea');
+      if (input) input.focus();
+    });
+  </script>
+</body>
+</html>
