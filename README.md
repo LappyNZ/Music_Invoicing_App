@@ -123,9 +123,11 @@ EMAIL_REDIRECT_TO=your@email.com
 
 ## 🧾 Production Deployment (Unraid / Docker)
 
-Production uses:
+The Unraid server runs the image that GitHub Actions publishes from `main`
+(`ghcr.io/lappynz/music_invoicing_app`), with its data in `/mnt/user/appdata/music-invoice`.
 
-docker compose -f docker/docker-compose.prod.yml up -d
+See **[deploy/unraid/README.md](deploy/unraid/README.md)** for updating, rolling back, nightly backups and
+restoring from a backup.
 
 # Important: Data Persistence
 
@@ -140,13 +142,12 @@ These are not part of the container image and will survive updates.
 
 Recommended workflow:
 
-1. Develop and test locally
-2. Commit changes
-3. Deploy to server:
+1. Develop and test locally (`pytest`)
+2. Commit on a branch and open a pull request; GitHub runs the tests
+3. Merge into `main`; GitHub publishes a new image once the tests pass
+4. On the server: `bash /mnt/user/appdata/music-invoice/scripts/update.sh`
 
-docker compose -f docker/docker-compose.prod.yml up -d --build
-
-Your data is safe because it lives outside the container.
+Your data is safe because it lives outside the container, and `update.sh` takes a backup first.
 
 ## 🧪 Development Workflow
 
@@ -158,6 +159,11 @@ Suggested VS Code tasks:
 * Dev: restart
 
 Use a Python venv locally for linting/debugging, but Docker is the source of truth for runtime.
+
+Run the tests before committing:
+
+pip install -r requirements-dev.txt
+pytest
 
 ## 🔐 Security Notes
 
