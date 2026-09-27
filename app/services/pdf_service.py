@@ -1,10 +1,12 @@
 import os
 from datetime import datetime
+from xml.sax.saxutils import escape
 
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.enums import TA_RIGHT
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 
 
 def build_invoice_pdf(
@@ -39,24 +41,28 @@ def build_invoice_pdf(
     styles = getSampleStyleSheet()
     elements = []
 
+    # Paragraphs read their text as markup, so "<" or "&" in a name would vanish or break the PDF.
+    def text(value):
+        return Paragraph(escape(str(value or "")), styles["Normal"])
+
     if os.path.exists(logo_path):
         elements.append(Image(logo_path, width=80, height=80))
     elements.append(Spacer(1, 20))
 
-    elements.append(Paragraph(business_address_line1, styles["Normal"]))
-    elements.append(Paragraph(business_address_line2, styles["Normal"]))
-    elements.append(Paragraph(f"Email: {sender_email}", styles["Normal"]))
-    elements.append(Paragraph(f"Phone: {business_phone}", styles["Normal"]))
-    elements.append(Paragraph(f"Mobile: {business_mobile}", styles["Normal"]))
+    elements.append(text(business_address_line1))
+    elements.append(text(business_address_line2))
+    elements.append(text(f"Email: {sender_email}"))
+    elements.append(text(f"Phone: {business_phone}"))
+    elements.append(text(f"Mobile: {business_mobile}"))
     elements.append(Spacer(1, 20))
 
-    elements.append(Paragraph(f"<b>Invoice No:</b> {invoice_number}", styles["Normal"]))
+    elements.append(Paragraph(f"<b>Invoice No:</b> {escape(invoice_number)}", styles["Normal"]))
     elements.append(Paragraph(f"<b>Date Issued:</b> {datetime.now().strftime('%d %b %Y')}", styles["Normal"]))
     elements.append(Spacer(1, 20))
 
     elements.append(Paragraph("<b>Invoice To:</b>", styles["Heading4"]))
-    elements.append(Paragraph(f"Student: {student_name}", styles["Normal"]))
-    elements.append(Paragraph(f"Email: {student_email}", styles["Normal"]))
+    elements.append(text(f"Student: {student_name}"))
+    elements.append(text(f"Email: {student_email}"))
     elements.append(Spacer(1, 20))
 
     elements.append(Paragraph(
@@ -69,13 +75,16 @@ def build_invoice_pdf(
     for l in lessons:
         data.append([l["date_str"], str(l["duration"]), f"{l['rate']:.2f}", f"{l['subtotal']:.2f}"])
 
+    extra_rows = []
     if extras:
         data.append(["", "", "", ""])
         data.append([Paragraph("<b>Extra Items</b>", styles["Normal"]), "", "", ""])
         for e in extras:
-            data.append([e["desc"], "", "", f"{e['price']:.2f}"])
+            extra_rows.append(len(data))
+            data.append([text(e["desc"]), "", "", f"{e['price']:.2f}"])
 
-    data.append(["", "", Paragraph("<b>Total</b>", styles["Normal"]), Paragraph(f"<b>{total:.2f}</b>", styles["Normal"])])
+    right = ParagraphStyle("Right", parent=styles["Normal"], alignment=TA_RIGHT)  # lines up with the subtotals
+    data.append(["", "", Paragraph("<b>Total</b>", styles["Normal"]), Paragraph(f"<b>{total:.2f}</b>", right)])
 
     table = Table(data, colWidths=[150, 100, 100, 100])
     table.setStyle(TableStyle([
@@ -86,13 +95,16 @@ def build_invoice_pdf(
         ("ALIGN", (3, 1), (3, -1), "RIGHT"),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+        # A long description wraps across the first three columns instead of running into the price.
+        *[("SPAN", (0, row), (2, row)) for row in extra_rows],
     ]))
     elements.append(table)
 
     elements.append(Spacer(1, 40))
     elements.append(Paragraph("<b>Payment Information</b>", styles["Heading4"]))
     elements.append(Paragraph("Please pay to:", styles["Normal"]))
-    elements.append(Paragraph(bank_account, styles["Normal"]))
-    elements.append(Paragraph(f"Reference: {student_name} + {invoice_number}", styles["Normal"]))
+    elements.append(text(bank_account))
+    elements.append(text(f"Reference: {invoice_number}"))
+    elements.append(text(f"Particulars: {student_name}"))
 
     doc.build(elements)

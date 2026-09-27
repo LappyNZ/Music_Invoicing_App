@@ -1,14 +1,27 @@
+import math
 import os
 from datetime import datetime
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash, current_app, send_from_directory
 
 from db import get_db
+from services.email_service import GmailNotConnected
 from services.invoice_service import send_invoice
 from services.pdf_service import build_invoice_pdf  # only if already needed here
-from utils import build_invoice_filename, invoice_number, nz_school_term, parse_date_any, fmt_date
+from utils import (DATETIME_FORMAT, fmt_date, invoice_number_of, new_invoice_number, parse_date_any,
+                   parse_datetime, pdf_filename_of)
 
 invoices_bp = Blueprint("invoices_bp", __name__)
+
+
+def to_number(text):
+    """The number in a form field, or None if there isn't one (including "nan" and "inf")."""
+    try:
+        number = float(text)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
 
 # ---------------- Create Invoice ----------------
 @invoices_bp.route("/invoices", methods=["GET", "POST"])
@@ -16,7 +29,7 @@ def invoices():
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT id, name, parent, email FROM students ORDER BY name")
+    cur.execute("SELECT id, name, parent, email FROM students WHERE active = 1 ORDER BY name")
     students = cur.fetchall()
 
     lessons, extras = [], []
@@ -29,7 +42,14 @@ def invoices():
         selected_student = request.form["student_id"]
         start_date = request.form["start_date"]
         end_date = request.form["end_date"]
+        if start_date > end_date:  # both YYYY-MM-DD
+            flash("The start date is after the end date. Please check the dates.", "warning")
+            conn.close()
+            return render_template("invoices.html", students=students, lessons=[], extras=[], total=0.0,
+                                   selected_student=selected_student, start_date=start_date,
+                                   end_date=end_date, previewed=False)
         previewed = True
+        problems = []  # rows that can't be read: shown for fixing, and nothing is generated
 
         # Posted rows were loaded for one student and period. If either has changed since,
         # they (and any extras typed with them) belong to someone else, so start again.
@@ -43,13 +63,18 @@ def invoices():
         if has_rows and not selection_changed:
             lesson_count = int(request.form.get("lesson_count", "0") or 0)
             for i in range(1, lesson_count + 1):
-                date_str = request.form.get(f"lesson_date_{i}")
-                duration = request.form.get(f"lesson_duration_{i}")
-                rate     = request.form.get(f"lesson_rate_{i}")
-                if not (date_str and duration and rate):
+                date_str = (request.form.get(f"lesson_date_{i}") or "").strip()
+                duration = (request.form.get(f"lesson_duration_{i}") or "").strip()
+                rate     = (request.form.get(f"lesson_rate_{i}") or "").strip()
+                if not (date_str or duration or rate):
                     continue
-                duration_i = int(float(duration))
-                rate_f = float(rate)
+                if not date_str or to_number(duration) is None or to_number(rate) is None:
+                    problems.append(f"lesson {i} needs a date, and numbers for duration and rate")
+                    lessons.append({"date_str": date_str, "duration": duration, "rate": rate,
+                                    "subtotal": 0.0, "problem": True})
+                    continue
+                duration_i = int(to_number(duration))
+                rate_f = to_number(rate)
                 subtotal = round((duration_i / 60.0) * rate_f, 2)
                 lessons.append({
                     "date_str": date_str,
@@ -88,12 +113,20 @@ def invoices():
         # Extras (posted only)
         extra_count = 0 if selection_changed else int(request.form.get("extra_count", "0") or 0)
         for i in range(1, extra_count + 1):
-            desc = request.form.get(f"extra_desc_{i}")
-            price = request.form.get(f"extra_price_{i}")
-            if desc and price:
-                price_f = float(price)
-                extras.append({"desc": desc, "price": price_f})
-                total += price_f
+            desc = (request.form.get(f"extra_desc_{i}") or "").strip()
+            price = (request.form.get(f"extra_price_{i}") or "").strip()
+            if not (desc or price):
+                continue
+            if not desc or to_number(price) is None:
+                problems.append(f"extra item {i} needs a description and a price")
+                extras.append({"desc": desc, "price": price, "problem": True})
+                continue
+            extras.append({"desc": desc, "price": to_number(price)})
+            total += to_number(price)
+
+        if problems and not selection_changed:
+            flash(("Not generated: " if action == "generate_pdf" else "Please fix: ")
+                  + "; ".join(problems) + ".", "warning")
 
         if selection_changed:
             if action == "generate_pdf":
@@ -102,7 +135,7 @@ def invoices():
             else:
                 flash("Lessons reloaded for the new student or dates. "
                       "Edits and extra items from the previous preview were cleared.", "info")
-        elif action == "generate_pdf":
+        elif action == "generate_pdf" and not problems:
             if not lessons and not extras:
                 flash("There's nothing to invoice: no lessons or extra items.", "warning")
             else:
@@ -119,6 +152,22 @@ def invoices():
                            start_date=start_date,
                            end_date=end_date,
                            previewed=previewed)
+
+# Invoices with their student's details. LEFT JOIN, so invoices of a deleted student still show.
+INVOICE_QUERY = """
+    SELECT invoices.id, invoices.start_date, invoices.end_date,
+           invoices.total, invoices.created_at,
+           invoices.emailed_at, invoices.emailed_to,
+           invoices.status, invoices.paid_at, invoices.paid_amount, invoices.paid_ref,
+           invoices.voided_at, invoices.void_reason,
+           invoices.invoice_number, invoices.pdf_filename,
+           invoices.student_id AS student_id,
+           COALESCE(students.name, 'Deleted student #' || invoices.student_id) AS student_name,
+           students.parent AS parent_name,
+           students.email AS student_email
+    FROM invoices
+    LEFT JOIN students ON invoices.student_id = students.id
+"""
 
 # ---------------- Back to the invoice list, keeping its filters ----------------
 def redirect_to_list(form):
@@ -142,40 +191,37 @@ def update_invoice_status(invoice_id):
         flash("Invalid status.", "warning")
         return redirect(url_for("invoices_bp.invoice_list"))
 
+    amount = to_number(paid_amt) if paid_amt else None
+    if paid_amt and amount is None:
+        flash("The amount must be a number, e.g. 45.00. Nothing was changed.", "warning")
+        return redirect_to_list(request.form)
+    paid_when = parse_datetime(paid_at) if paid_at else datetime.now()  # blank means now
+    if paid_when is None:
+        flash("The payment date wasn't understood. Nothing was changed.", "warning")
+        return redirect_to_list(request.form)
+
     conn = get_db()
     cur = conn.cursor()
 
-    current = cur.execute("SELECT status FROM invoices WHERE id=?", (invoice_id,)).fetchone()
-    if current and current["status"] == "void":
+    current = cur.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+    if not current:
         conn.close()
-        flash(f"Invoice {invoice_id} is void. Restore it before changing its status.", "warning")
+        flash("Invoice not found.", "danger")
+        return redirect_to_list(request.form)
+    if current["status"] == "void":
+        conn.close()
+        flash(f"Invoice {invoice_number_of(current)} is void. Restore it before changing its status.", "warning")
         return redirect_to_list(request.form)
 
     if new_status == "paid":
-        # Default to now if no date provided
-        if not paid_at:
-            cur.execute("""
-                UPDATE invoices
-                   SET status='paid',
-                       paid_at = datetime('now'),
-                       paid_amount = COALESCE(?, paid_amount),
-                       paid_ref = COALESCE(?, paid_ref)
-                 WHERE id=?
-            """, (float(paid_amt) if paid_amt else None,
-                  paid_ref or None,
-                  invoice_id))
-        else:
-            cur.execute("""
-                UPDATE invoices
-                   SET status='paid',
-                       paid_at = ?,
-                       paid_amount = COALESCE(?, paid_amount),
-                       paid_ref = COALESCE(?, paid_ref)
-                 WHERE id=?
-            """, (paid_at,
-                  float(paid_amt) if paid_amt else None,
-                  paid_ref or None,
-                  invoice_id))
+        cur.execute("""
+            UPDATE invoices
+               SET status='paid',
+                   paid_at = ?,
+                   paid_amount = COALESCE(?, paid_amount),
+                   paid_ref = COALESCE(?, paid_ref)
+             WHERE id=?
+        """, (paid_when.strftime(DATETIME_FORMAT), amount, paid_ref or None, invoice_id))
     else:
         cur.execute("UPDATE invoices SET status=? WHERE id=?",
                     (new_status, invoice_id))
@@ -183,7 +229,7 @@ def update_invoice_status(invoice_id):
     conn.commit()
     conn.close()
 
-    flash(f"Invoice {invoice_id} marked as {new_status}.", "success")
+    flash(f"Invoice {invoice_number_of(current)} marked as {new_status}.", "success")
     return redirect_to_list(request.form)
 
 # ---------------- Void / Restore Invoice ----------------
@@ -192,7 +238,7 @@ def update_invoice_status(invoice_id):
 def void_invoice(invoice_id):
     reason = request.form.get("void_reason", "").strip()
     conn = get_db()
-    inv = conn.execute("SELECT status, created_at FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+    inv = conn.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
     if not inv:
         flash("Invoice not found.", "danger")
     elif inv["status"] == "paid":
@@ -201,7 +247,7 @@ def void_invoice(invoice_id):
         conn.execute("UPDATE invoices SET status='void', voided_at=?, void_reason=? WHERE id=?",
                      (datetime.now().isoformat(sep=' ', timespec='seconds'), reason or None, invoice_id))
         conn.commit()
-        flash(f"Invoice {invoice_number(inv['created_at'], invoice_id)} voided.", "success")
+        flash(f"Invoice {invoice_number_of(inv)} voided.", "success")
     conn.close()
     return redirect_to_list(request.form)
 
@@ -209,14 +255,34 @@ def void_invoice(invoice_id):
 @invoices_bp.route("/invoices/restore/<int:invoice_id>", methods=["POST"])
 def restore_invoice(invoice_id):
     conn = get_db()
-    inv = conn.execute("SELECT created_at FROM invoices WHERE id=? AND status='void'", (invoice_id,)).fetchone()
+    inv = conn.execute("SELECT * FROM invoices WHERE id=? AND status='void'", (invoice_id,)).fetchone()
     if inv:
         conn.execute("""UPDATE invoices
                            SET status = CASE WHEN emailed_at IS NULL THEN 'draft' ELSE 'sent' END,
                                voided_at = NULL, void_reason = NULL
                          WHERE id=?""", (invoice_id,))
         conn.commit()
-        flash(f"Invoice {invoice_number(inv['created_at'], invoice_id)} restored.", "success")
+        flash(f"Invoice {invoice_number_of(inv)} restored.", "success")
+    conn.close()
+    return redirect_to_list(request.form)
+
+# Undo "Mark paid", e.g. when a payment was recorded against the wrong invoice.
+@invoices_bp.route("/invoices/unpaid/<int:invoice_id>", methods=["POST"])
+def mark_unpaid(invoice_id):
+    conn = get_db()
+    inv = conn.execute("SELECT * FROM invoices WHERE id=? AND status='paid'", (invoice_id,)).fetchone()
+    if inv:
+        conn.execute("""UPDATE invoices
+                           SET status = CASE WHEN emailed_at IS NULL THEN 'draft' ELSE 'sent' END,
+                               paid_at = NULL, paid_amount = NULL, paid_ref = NULL
+                         WHERE id=?""", (invoice_id,))
+        conn.commit()
+        removed = " ".join(part for part in (
+            f"${inv['paid_amount']:.2f}" if inv["paid_amount"] is not None else "",
+            f"on {inv['paid_at']}" if inv["paid_at"] else "",
+            f"(ref {inv['paid_ref']})" if inv["paid_ref"] else "") if part)
+        flash(f"Invoice {invoice_number_of(inv)} is no longer marked paid."
+              + (f" The payment removed was {removed}." if removed else ""), "success")
     conn.close()
     return redirect_to_list(request.form)
 
@@ -226,8 +292,8 @@ def invoice_list():
     conn = get_db()
     cur = conn.cursor()
 
-    # Student list for filter dropdown
-    cur.execute("SELECT id, name FROM students ORDER BY name")
+    # Student list for filter dropdown, including archived students
+    cur.execute("SELECT id, name, active FROM students ORDER BY name")
     student_options = cur.fetchall()
 
     # Filters
@@ -238,21 +304,7 @@ def invoice_list():
     term_filter = request.args.get("term", "")   # 'T1'/'T2'/'T3'/'T4' or ''
     year        = request.args.get("year", "")   # '2025', etc., or ''
 
-    # Build query (include new columns for UI)
-    query = """
-        SELECT invoices.id, invoices.start_date, invoices.end_date,
-               invoices.total, invoices.created_at,
-               invoices.emailed_at, invoices.emailed_to,
-               invoices.status, invoices.paid_at, invoices.paid_amount, invoices.paid_ref,
-               invoices.voided_at, invoices.void_reason,
-               students.id AS student_id,
-               students.name AS student_name,
-               students.parent AS parent_name,
-               students.email AS student_email
-        FROM invoices
-        JOIN students ON invoices.student_id = students.id
-        WHERE 1=1
-    """
+    query = INVOICE_QUERY + " WHERE 1=1"
     params = []
 
     if student_id:
@@ -333,40 +385,21 @@ def invoice_list():
                 errors.append(f"Invoice {sid}: not found in filter.")
                 continue
 
-            st = inv["status"] or ("sent" if inv["emailed_at"] else "draft")
-            if st in ("paid", "void"):
-                skipped += 1
-                errors.append(f"Invoice {sid}: {st}, so not emailed.")
-                continue
-
-            filename = build_invoice_filename(inv["created_at"], inv["id"])
-            pdf_path = os.path.join(current_app.config["INVOICE_PDF_DIR"], filename)   
-
-            result = send_invoice(inv, pdf_path, fmt_date, parse_date_any)
+            try:
+                result = email_invoice(inv)
+            except GmailNotConnected as e:
+                errors.insert(0, f"Stopped: {e} {GMAIL_HELP}")
+                failed += 1
+                break
 
             if result["status"] == "sent":
                 sent += 1
-
-                conn2 = get_db()
-                cur2 = conn2.cursor()
-                cur2.execute(
-                    "UPDATE invoices SET emailed_at = ?, emailed_to = ?, status = 'sent' WHERE id = ?",
-                    (datetime.now().isoformat(sep=' ', timespec='seconds'), result["to"], inv["id"])
-                )
-                conn2.commit()
-                conn2.close()
-
-            elif result["status"] == "blocked":
+            elif result["status"] in ("blocked", "skipped"):
                 skipped += 1
-                errors.append(f"Invoice {sid}: email blocked in development mode.")
-
-            elif result["status"] == "skipped":
-                skipped += 1
-                errors.append(f"Invoice {sid}: no email address.")
-
+                errors.append(result["message"])
             else:
                 failed += 1
-                errors.append(f"Invoice {sid}: {result.get('message', 'Unknown error')}")
+                errors.append(result["message"])
 
         summary = f"Emailed: {sent}, Not sent: {skipped}, Failed: {failed}"
         flash(summary, "success" if failed == 0 else "warning")
@@ -397,6 +430,51 @@ def invoice_list():
         year_options=year_options,
     )
 
+# ---------------- Email one invoice ----------------
+GMAIL_HELP = "Nothing more was sent. Gmail needs connecting again (see the Unraid README), then send the rest."
+
+
+def email_invoice(inv):
+    """Email one invoice (a row from INVOICE_QUERY) and record that it was sent.
+    Raises GmailNotConnected, which should stop any further sending."""
+    number = invoice_number_of(inv)
+    st = inv["status"] or ("sent" if inv["emailed_at"] else "draft")
+    if st in ("paid", "void"):
+        return {"status": "skipped", "message": f"{number}: {st}, so not emailed."}
+
+    pdf_path = os.path.join(current_app.config["INVOICE_PDF_DIR"], pdf_filename_of(inv))
+    result = send_invoice(inv, pdf_path, fmt_date, parse_date_any)
+
+    if result["status"] == "sent":
+        conn = get_db()
+        conn.execute(
+            "UPDATE invoices SET emailed_at = ?, emailed_to = ?, status = 'sent' WHERE id = ?",
+            (datetime.now().isoformat(sep=' ', timespec='seconds'), result["to"], inv["id"])
+        )
+        conn.commit()
+        conn.close()
+        return {"status": "sent", "message": f"{number}: emailed to {result['to']}."}
+    if result["status"] == "blocked":
+        return {"status": "blocked", "message": f"{number}: email is switched off here (EMAIL_ENABLED)."}
+    if result["status"] == "skipped":
+        return {"status": "skipped", "message": f"{number}: {inv['student_name']} has no email address."}
+    return {"status": "failed", "message": f"{number}: {result.get('message', 'Unknown error')}"}
+
+
+# One invoice per request, so a long batch can't time out part-way (the list page sends them in turn).
+@invoices_bp.route("/invoices/send/<int:invoice_id>", methods=["POST"])
+def send_one_invoice(invoice_id):
+    conn = get_db()
+    inv = conn.execute(INVOICE_QUERY + " WHERE invoices.id = ?", (invoice_id,)).fetchone()
+    conn.close()
+    if not inv:
+        return {"status": "failed", "message": f"Invoice {invoice_id} not found."}, 404
+    try:
+        return email_invoice(inv)
+    except GmailNotConnected as e:
+        return {"status": "gmail_not_connected", "message": f"{e} {GMAIL_HELP}"}, 503
+
+
 # ---------------- Generate Invoice PDF ----------------
 def generate_invoice_pdf(student_id, start_date, end_date, lessons, extras, total):
     conn = get_db()
@@ -404,17 +482,18 @@ def generate_invoice_pdf(student_id, start_date, end_date, lessons, extras, tota
     cur.execute("SELECT name, parent, email FROM students WHERE id=?", (student_id,))
     student = cur.fetchone()
 
-    # Insert new invoice record
+    # Insert new invoice record, with its number and PDF filename
     cur.execute(
         "INSERT INTO invoices (student_id, start_date, end_date, total) VALUES (?, ?, ?, ?)",
         (student_id, start_date, end_date, total)
     )
-    conn.commit()
     invoice_id = cur.lastrowid
+    number = new_invoice_number(invoice_id)
+    filename = f"{number}.pdf"
+    cur.execute("UPDATE invoices SET invoice_number=?, pdf_filename=? WHERE id=?", (number, filename, invoice_id))
+    conn.commit()
     conn.close()
 
-    invoice_number = f"INV-{datetime.now().year}-{invoice_id:04d}"
-    filename = f"{invoice_number}.pdf"
     filepath = os.path.join(current_app.config["INVOICE_PDF_DIR"], filename)
 
     logo_path = os.path.join(
@@ -435,7 +514,7 @@ def generate_invoice_pdf(student_id, start_date, end_date, lessons, extras, tota
         bank_account=current_app.config["BANK_ACCOUNT"],
         student_name=student["name"],
         student_email=student["email"],
-        invoice_number=invoice_number,
+        invoice_number=number,
         start_date_str=start_date,
         end_date_str=end_date,
         lessons=lessons,
@@ -444,7 +523,7 @@ def generate_invoice_pdf(student_id, start_date, end_date, lessons, extras, tota
         fmt_date=fmt_date,
     )
 
-    flash(f"Invoice {invoice_number} generated successfully.", "success")
+    flash(f"Invoice {number} generated successfully.", "success")
     return redirect(url_for("invoices_bp.invoice_list"))
 
 
@@ -453,7 +532,7 @@ def generate_invoice_pdf(student_id, start_date, end_date, lessons, extras, tota
 def regenerate_invoice_pdf(invoice_id):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT created_at FROM invoices WHERE id=?", (invoice_id,))
+    cur.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,))
     invoice = cur.fetchone()
     conn.close()
 
@@ -461,9 +540,7 @@ def regenerate_invoice_pdf(invoice_id):
         flash("Invoice not found.", "danger")
         return redirect(url_for("invoices_bp.invoice_list"))
 
-    year = invoice["created_at"][:4] if invoice["created_at"] else str(datetime.now().year)
-    invoice_number = f"INV-{year}-{invoice_id:04d}"
-    filename = f"{invoice_number}.pdf"
+    filename = pdf_filename_of(invoice)
     filepath = os.path.join(current_app.config["INVOICE_PDF_DIR"], filename)
 
     if not os.path.exists(filepath):

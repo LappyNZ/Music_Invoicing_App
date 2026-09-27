@@ -16,7 +16,6 @@ services:
 
     ports:
       - "8086:8000"
-      - "8096:8090"
 
     restart: unless-stopped
 

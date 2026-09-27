@@ -45,9 +45,10 @@
       <tbody>
         {% for l in lessons %}
         <tr class="lesson-row">
-          <td><input type="text" name="lesson_date_{{ loop.index }}" value="{{ l.date_str }}" class="form-control"></td>
-          <td><input type="number" name="lesson_duration_{{ loop.index }}" value="{{ l.duration }}" class="form-control duration"></td>
-          <td><input type="number" step="0.01" name="lesson_rate_{{ loop.index }}" value="{{ l.rate }}" class="form-control rate"></td>
+          {% set invalid = ' is-invalid' if l.problem else '' %}
+          <td><input type="text" name="lesson_date_{{ loop.index }}" value="{{ l.date_str }}" class="form-control{{ invalid }}"></td>
+          <td><input type="number" name="lesson_duration_{{ loop.index }}" value="{{ l.duration }}" class="form-control duration{{ invalid }}"></td>
+          <td><input type="number" step="0.01" name="lesson_rate_{{ loop.index }}" value="{{ l.rate }}" class="form-control rate{{ invalid }}"></td>
           <td><input type="number" step="0.01" name="lesson_subtotal_{{ loop.index }}" value="{{ l.subtotal }}" class="form-control subtotal text-end" readonly></td>
           <td><button type="button" class="btn btn-sm btn-danger delete-row">Delete</button></td>
         </tr>
@@ -65,12 +66,13 @@
     {% set extra_rows = [5, extras|length + 1]|max %}
     {% for i in range(1, extra_rows + 1) %}
       {% set e = extras[i - 1] if i <= extras|length else none %}
+      {% set invalid = ' is-invalid' if e and e.problem else '' %}
       <div class="row g-2 mb-2 align-items-center extra-row">
         <div class="col-md-8">
-          <input type="text" name="extra_desc_{{ i }}" value="{{ e.desc if e else '' }}" placeholder="Description" class="form-control">
+          <input type="text" name="extra_desc_{{ i }}" value="{{ e.desc if e else '' }}" placeholder="Description" class="form-control{{ invalid }}">
         </div>
         <div class="col-md-3">
-          <input type="number" step="0.01" name="extra_price_{{ i }}" value="{{ '%.2f'|format(e.price) if e else '' }}" placeholder="Price" class="form-control extra-price">
+          <input type="number" step="0.01" name="extra_price_{{ i }}" value="{{ ('%.2f'|format(e.price) if e.price is number else e.price) if e else '' }}" placeholder="Price" class="form-control extra-price{{ invalid }}">
         </div>
         <div class="col-md-1">
           <button type="button" class="btn btn-sm btn-danger delete-row">✕</button>

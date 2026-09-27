@@ -1,5 +1,6 @@
 import os
 import tempfile
+import time
 
 import pytest
 
@@ -30,6 +31,19 @@ def app(tmp_path):
     with flask_app.app_context():
         init_db()
     return flask_app
+
+
+@pytest.fixture
+def new_zealand_time():
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "Pacific/Auckland"
+    time.tzset()
+    yield
+    if old is None:
+        del os.environ["TZ"]
+    else:
+        os.environ["TZ"] = old
+    time.tzset()
 
 
 @pytest.fixture

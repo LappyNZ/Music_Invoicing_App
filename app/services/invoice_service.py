@@ -1,6 +1,6 @@
 from flask import current_app
-from utils import nz_school_term
-from services.email_service import send_invoice_via_gmail
+from utils import invoice_number_of, nz_school_term
+from services.email_service import GmailNotConnected, send_invoice_via_gmail
 
 def send_invoice(inv, pdf_path, fmt_date, parse_date_any):
     has_parent = bool(inv["parent_name"])
@@ -27,7 +27,8 @@ def send_invoice(inv, pdf_path, fmt_date, parse_date_any):
         f"Total due: ${inv['total']:.2f}\n\n"
         f"Payment details:\n"
         f"Bank: {current_app.config['BANK_ACCOUNT']}\n"
-        f"Reference: {inv['student_name']}\n\n"
+        f"Reference: {invoice_number_of(inv)}\n"
+        f"Particulars: {inv['student_name']}\n\n"
         f"Ngā mihi,\n"
         f"{current_app.config['SENDER_NAME']}"
     )
@@ -42,5 +43,7 @@ def send_invoice(inv, pdf_path, fmt_date, parse_date_any):
             sender_name=current_app.config["SENDER_NAME"],
         )
         return result
+    except GmailNotConnected:
+        raise  # stops the whole batch: every other invoice would fail the same way
     except Exception as e:
         return {"status": "failed", "message": str(e)}

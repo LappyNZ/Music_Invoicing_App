@@ -6,12 +6,12 @@ Designed for simplicity, safety, and maintainability, with a clean UI and a Dock
 
 ## ✨ Features
 
-* Student management (name, email, parent, phone, school)
+* Student management (name, email, parent, phone, school); students who stop are archived, keeping their history
 * Lesson tracking with filtering and repeat scheduling
-* Invoice generation (PDF via ReportLab)
-* Bulk email sending via Gmail API (OAuth)
+* Invoice generation (PDF via ReportLab), numbered like `INV26-0042` to fit a NZ bank payment reference
+* Email sending via the Gmail API (OAuth), one invoice at a time with a progress window
 * Invoice status tracking:
-  * Draft → Sent → Paid
+  * Draft → Sent → Paid, with Void and Mark unpaid for corrections
 * NZ school term filtering
 * Persistent filters across actions
 * Safe development mode (email blocking)
@@ -23,7 +23,8 @@ music-invoice/
 ├─ app/
 │  ├─ app.py              # Flask app entry point
 │  ├─ config.py           # Central config (env-driven)
-│  ├─ db.py               # DB connection + init
+│  ├─ db.py               # DB connection, set-up and upgrades
+│  ├─ gmail_auth.py       # Connects the app to Gmail (python -m gmail_auth)
 │  ├─ utils.py            # Shared helpers
 │  ├─ routes/             # Blueprints
 │  │  ├─ students.py
@@ -33,8 +34,13 @@ music-invoice/
 │  │  ├─ email_service.py
 │  │  ├─ invoice_service.py
 │  │  └─ pdf_service.py
+│  ├─ tools/              # One-off maintenance, e.g. restore_deleted_students.py
 │  ├─ templates/
 │  └─ static/
+│
+├─ deploy/unraid/         # Server compose file, scripts and runbook
+├─ scripts/reset_dev_db.py  # Fills data-dev/ with made-up sample data
+├─ tests/                 # pytest
 │
 ├─ docker/
 │  ├─ Dockerfile
@@ -78,6 +84,7 @@ EMAIL_REDIRECT_TO=
 SECRETS_DIR=/secrets
 GOOGLE_OAUTH_CREDENTIALS=/secrets/credentials.json
 GOOGLE_OAUTH_TOKEN=/secrets/token.json
+# Only appears in the address Google sends the browser back to when connecting Gmail
 OAUTH_PORT=8090
 
 # Business details (used in invoices)
@@ -102,6 +109,14 @@ http://localhost:8086
 Stop
 
 docker compose -f docker/docker-compose.dev.yml down
+
+Sample data (made-up students, lessons and invoices; replaces what's in data-dev/)
+
+python scripts/reset_dev_db.py
+
+Connect Gmail (only needed to send real email; see EMAIL_ENABLED below)
+
+docker exec -it music-invoice-dev python -m gmail_auth
 
 ## 🛡️ Email Safety (Important)
 
@@ -188,8 +203,8 @@ Only .env.example is tracked.
 
 ## 🧭 Future Improvements
 
-* GitHub Container Registry (GHCR) image publishing
-* Automated deployment workflow
+See [docs/review-and-roadmap.md](docs/review-and-roadmap.md) for the full plan. In short:
+
 * Improved invoice preview UX
 * Better payment reconciliation tools
 * Multi-teacher support

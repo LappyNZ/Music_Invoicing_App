@@ -1,18 +1,11 @@
 # syntax=docker/dockerfile:1
 FROM python:3.11-slim
 
-# Install system libs – add more if your app needs them (wkhtmltopdf, cairo, etc.)
+# curl is for the healthcheck in the compose files. Every Python package installs from a ready-built
+# wheel, so no compiler is needed.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libpq-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
-
-# OPTIONAL: If you generate PDFs with wkhtmltopdf or WeasyPrint, uncomment what you need:
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#     wkhtmltopdf \
-#     libffi-dev libpango-1.0-0 libpangoft2-1.0-0 libjpeg62-turbo \
-#     && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -26,8 +19,7 @@ WORKDIR /app
 
 # Copy requirements first for caching
 COPY requirements.txt /tmp/requirements.txt
-RUN pip install --upgrade pip && pip install -r /tmp/requirements.txt \
-    && pip install gunicorn 
+RUN pip install --only-binary=:all: -r /tmp/requirements.txt
 
 # Copy app code
 COPY app/ /app/
