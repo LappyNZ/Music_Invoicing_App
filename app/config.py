@@ -29,6 +29,7 @@ class BaseConfig:
     OAUTH_PORT = int(os.getenv("OAUTH_PORT", "8090"))
 
     APP_ENV = os.getenv("APP_ENV", "production")
+    APP_VERSION = os.getenv("APP_VERSION", "dev")  # git commit, set when the Docker image is built
     EMAIL_ENABLED = as_bool(os.getenv("EMAIL_ENABLED"), True)
     EMAIL_REDIRECT_TO = os.getenv("EMAIL_REDIRECT_TO", "")
     SAFE_MODE = as_bool(os.getenv("SAFE_MODE"), False)

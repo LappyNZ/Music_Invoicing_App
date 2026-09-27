@@ -6,6 +6,9 @@ set -e
 : "${WORKERS:=3}"
 : "${TIMEOUT:=60}"
 
+echo "Creating or upgrading the database"
+python -c "import app"
+
 echo "Starting Flask app with APP_MODULE=${APP_MODULE} on PORT=${PORT}"
 
 exec gunicorn "$APP_MODULE" \

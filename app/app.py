@@ -22,6 +22,10 @@ app.register_blueprint(students_bp)
 app.register_blueprint(lessons_bp)
 app.register_blueprint(invoices_bp)
 
+# Create or upgrade the database. start.sh also imports this module once before gunicorn starts.
+with app.app_context():
+    init_db()
+
 
 # Make helpers available in Jinja templates
 app.jinja_env.globals["fmt_date_display"] = fmt_date
@@ -30,9 +34,19 @@ app.jinja_env.globals["parse_date_any"] = parse_date_any
 app.jinja_env.globals["nz_school_term"] = nz_school_term
 
 
+@app.context_processor
+def inject_version():
+    return {"app_version": app.config["APP_VERSION"][:7]}
+
+
 @app.route("/health")
 def health():
     return "OK", 200
+
+
+@app.route("/version")
+def version():
+    return {"version": app.config["APP_VERSION"]}
 
 
 @app.route("/")
@@ -41,6 +55,4 @@ def index():
 
 
 if __name__ == "__main__":
-    with app.app_context():
-        init_db()
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")), debug=app.config["DEBUG"])

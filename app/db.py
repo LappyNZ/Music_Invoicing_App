@@ -2,10 +2,24 @@ import sqlite3
 from flask import current_app
 
 # ---------------- Database Setup ----------------
+# Runs on every start, often in several gunicorn workers at once. BEGIN IMMEDIATE takes the
+# write lock up front, so they take turns instead of racing to add the same column.
 def init_db():
-    conn = sqlite3.connect(current_app.config["DB_PATH"])
+    conn = sqlite3.connect(current_app.config["DB_PATH"], timeout=30, isolation_level=None)
     cur = conn.cursor()
+    try:
+        cur.execute("BEGIN IMMEDIATE")
+        _create_and_migrate(cur)
+        cur.execute("COMMIT")
+    except Exception:
+        if conn.in_transaction:
+            cur.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
 
+
+def _create_and_migrate(cur):
     # --- base tables ---
     cur.execute("""
     CREATE TABLE IF NOT EXISTS students (
@@ -59,12 +73,13 @@ def init_db():
         cur.execute("ALTER TABLE invoices ADD COLUMN paid_amount REAL")
     if "paid_ref" not in i_cols:
         cur.execute("ALTER TABLE invoices ADD COLUMN paid_ref TEXT")
+    if "voided_at" not in i_cols:
+        cur.execute("ALTER TABLE invoices ADD COLUMN voided_at TEXT")
+    if "void_reason" not in i_cols:
+        cur.execute("ALTER TABLE invoices ADD COLUMN void_reason TEXT")
 
     # helpful index
     cur.execute("CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status)")
-
-    conn.commit()
-    conn.close()
 
 def get_db():
     conn = sqlite3.connect(current_app.config["DB_PATH"])
