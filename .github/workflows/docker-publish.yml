@@ -3,6 +3,7 @@ name: Build and publish Docker image
 on:
   push:
     branches: ["main"]
+  pull_request:
   workflow_dispatch:
 
 env:
@@ -10,7 +11,32 @@ env:
   IMAGE_NAME: lappynz/music_invoicing_app
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q
+
   build-and-push:
+    # Only after the tests pass, and only from main: the Unraid server runs whatever is tagged latest.
+    needs: test
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
 
     permissions:
@@ -48,3 +74,5 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}

@@ -54,6 +54,7 @@
        <option value="draft" {% if status == 'draft' %}selected{% endif %}>Draft (not sent)</option>
        <option value="sent"  {% if status == 'sent' %}selected{% endif %}>Sent</option>
        <option value="paid"  {% if status == 'paid' %}selected{% endif %}>Paid</option>
+       <option value="void"  {% if status == 'void' %}selected{% endif %}>Void</option>
      </select>
    </div>
 
@@ -62,8 +63,9 @@
   </div>
 </form>
 
-<!-- Bulk send form -->
-<form method="POST">
+<!-- Bulk send form. Nothing inside it may be another <form>: browsers drop nested forms.
+     Row actions use the separate forms after it, via the button's form="..." attribute. -->
+<form method="POST" id="bulk-send-form">
   <input type="hidden" name="action" value="send">
 
   <div class="d-flex justify-content-between align-items-center mb-2">
@@ -98,10 +100,13 @@
       <tbody>
         {% for inv in invoices %}
         {% set invoice_number = "INV-" + inv.created_at[:4] + "-" + ("%04d"|format(inv.id)) %}
-        <tr>
-          <!-- Select -->
+        {% set st = (inv.status or ('sent' if inv.emailed_at else 'draft')) %}
+        <tr class="{{ 'text-muted' if st == 'void' }}">
+          <!-- Select (paid and void invoices can't be emailed) -->
           <td class="text-center">
-            <input type="checkbox" name="invoice_id" value="{{ inv.id }}" class="row-check">
+            <input type="checkbox" name="invoice_id" value="{{ inv.id }}" class="row-check"
+                   data-total="{{ '%.2f'|format(inv.total or 0) }}" data-sent="{{ 1 if st == 'sent' else 0 }}"
+                   {% if st in ('paid', 'void') %}disabled title="{{ st|capitalize }} invoices can't be emailed"{% endif %}>
           </td>
 
           <!-- Invoice No. -->
@@ -119,11 +124,10 @@
           </td>
 
           <!-- Total -->
-          <td class="text-end">${{ "%.2f"|format(inv.total or 0) }}</td>
+          <td class="text-end{{ ' text-decoration-line-through' if st == 'void' }}">${{ "%.2f"|format(inv.total or 0) }}</td>
 
           <!-- Status (compact badge with tooltip; includes Created) -->
           <td class="align-middle">
-            {% set st = (inv.status or ('sent' if inv.emailed_at else 'draft')) %}
             {% set tt_lines = [] %}
             {% if inv.created_at %}{% set _ = tt_lines.append('Created: ' ~ inv.created_at) %}{% endif %}
             {% if st == 'paid' %}
@@ -141,6 +145,13 @@
               {% set badge_class = 'bg-info text-dark' %}
               {% set icon = 'bi-envelope-check' %}
               {% set label = 'Sent' %}
+            {% elif st == 'void' %}
+              {% if inv.voided_at %}{% set _ = tt_lines.append('Voided: ' ~ inv.voided_at) %}{% endif %}
+              {% if inv.void_reason %}{% set _ = tt_lines.append('Reason: ' ~ inv.void_reason) %}{% endif %}
+              {% if inv.emailed_at %}{% set _ = tt_lines.append('Sent: ' ~ inv.emailed_at) %}{% endif %}
+              {% set badge_class = 'bg-dark' %}
+              {% set icon = 'bi-x-circle' %}
+              {% set label = 'Void' %}
             {% else %}
               {% set _ = tt_lines.append('Not emailed yet') %}
               {% set badge_class = 'bg-secondary' %}
@@ -159,7 +170,9 @@
           <!-- Actions -->
           <td class="text-center align-middle">
             <div class="dropdown">
-              <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+              <!-- "fixed" stops the table clipping the menu on the last rows -->
+              <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"
+                      data-bs-popper-config='{"strategy":"fixed"}'>
                 ⋯
               </button>
               <ul class="dropdown-menu dropdown-menu-end">
@@ -170,7 +183,7 @@
                   </a>
                 </li>
 
-                {% if st != 'paid' %}
+                {% if st not in ('paid', 'void') %}
                 <li><hr class="dropdown-divider"></li>
                 <li>
                   <button type="button" class="dropdown-item"
@@ -186,22 +199,36 @@
                     <i class="bi bi-cash-coin me-2"></i>Mark paid…
                   </button>
                 </li>
-                {% endif %}
-
                 {% if st == 'draft' %}
                 <li>
-                  <form method="POST" action="{{ url_for('invoices_bp.update_invoice_status', invoice_id=inv.id) }}" class="px-3 py-1">
-                    <input type="hidden" name="status" value="sent">
-                    <input type="hidden" name="return_student_id" value="{{ selected_student or '' }}">
-                    <input type="hidden" name="return_start_date" value="{{ start_date or '' }}">
-                    <input type="hidden" name="return_end_date" value="{{ end_date or '' }}">
-                    <input type="hidden" name="return_status" value="{{ status or '' }}">
-                    <input type="hidden" name="return_term" value="{{ term or '' }}">
-                    <input type="hidden" name="return_year" value="{{ year or '' }}">
-                    <button class="btn btn-sm btn-outline-primary w-100" type="submit">
-                      <i class="bi bi-send-check me-1"></i> Mark sent
-                    </button>
-                  </form>
+                  <button type="submit" form="mark-sent-{{ inv.id }}" class="dropdown-item">
+                    <i class="bi bi-send-check me-2"></i>Mark sent
+                  </button>
+                </li>
+                {% endif %}
+                <li>
+                  <button type="button" class="dropdown-item text-danger"
+                          data-bs-toggle="modal"
+                          data-bs-target="#voidModal"
+                          data-invoice-id="{{ inv.id }}"
+                          data-invoice-number="{{ invoice_number }}"
+                          data-return-student="{{ selected_student or '' }}"
+                          data-return-start="{{ start_date or '' }}"
+                          data-return-end="{{ end_date or '' }}"
+                          data-return-status="{{ status or '' }}"
+                          data-return-term="{{ term or '' }}"
+                          data-return-year="{{ year or '' }}">
+                    <i class="bi bi-x-circle me-2"></i>Void…
+                  </button>
+                </li>
+                {% endif %}
+
+                {% if st == 'void' %}
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <button type="submit" form="restore-{{ inv.id }}" class="dropdown-item">
+                    <i class="bi bi-arrow-counterclockwise me-2"></i>Restore
+                  </button>
                 </li>
                 {% endif %}
               </ul>
@@ -219,6 +246,29 @@
     </table>
   </div>
 </form>
+
+<!-- Row action forms, submitted by the "Mark sent" / "Restore" buttons in each row's menu -->
+{% macro return_fields() -%}
+  <input type="hidden" name="return_student_id" value="{{ selected_student or '' }}">
+  <input type="hidden" name="return_start_date" value="{{ start_date or '' }}">
+  <input type="hidden" name="return_end_date" value="{{ end_date or '' }}">
+  <input type="hidden" name="return_status" value="{{ status or '' }}">
+  <input type="hidden" name="return_term" value="{{ term or '' }}">
+  <input type="hidden" name="return_year" value="{{ year or '' }}">
+{%- endmacro %}
+{% for inv in invoices %}
+{% set st = (inv.status or ('sent' if inv.emailed_at else 'draft')) %}
+{% if st == 'draft' %}
+<form id="mark-sent-{{ inv.id }}" method="POST" action="{{ url_for('invoices_bp.update_invoice_status', invoice_id=inv.id) }}" hidden>
+  <input type="hidden" name="status" value="sent">
+  {{ return_fields() }}
+</form>
+{% elif st == 'void' %}
+<form id="restore-{{ inv.id }}" method="POST" action="{{ url_for('invoices_bp.restore_invoice', invoice_id=inv.id) }}" hidden>
+  {{ return_fields() }}
+</form>
+{% endif %}
+{% endfor %}
 
 <!-- script to wire up tooltips + modal target -->
 <script>
@@ -245,6 +295,21 @@ document.addEventListener("DOMContentLoaded", function () {
       document.getElementById('retYear').value    = btn.getAttribute('data-return-year') || '';
     });
   }
+
+  // Fill Void modal action & hidden fields
+  const voidModal = document.getElementById('voidModal');
+  if (voidModal) {
+    voidModal.addEventListener('show.bs.modal', function (event) {
+      const btn = event.relatedTarget;
+      document.getElementById('voidForm').action =
+        "{{ url_for('invoices_bp.void_invoice', invoice_id=0) }}".replace(/0$/, btn.getAttribute('data-invoice-id'));
+      document.getElementById('voidNumber').textContent = btn.getAttribute('data-invoice-number') || '';
+      document.getElementById('voidReason').value = '';
+      for (const key of ['student', 'start', 'end', 'status', 'term', 'year']) {
+        document.getElementById('void-return-' + key).value = btn.getAttribute('data-return-' + key) || '';
+      }
+    });
+  }
 });
 </script>
 
@@ -252,7 +317,7 @@ document.addEventListener("DOMContentLoaded", function () {
 <script>
 document.addEventListener("DOMContentLoaded", function () {
   const selectAll = document.getElementById("select-all");
-  const checks = Array.from(document.querySelectorAll(".row-check"));
+  const checks = Array.from(document.querySelectorAll(".row-check:not(:disabled)"));
   const selectedCount = document.getElementById("selected-count");
   const sendBtn = document.getElementById("send-btn");
 
@@ -287,6 +352,31 @@ document.addEventListener("DOMContentLoaded", function () {
     c.addEventListener("change", () => {
       updateCountAndButton();
     });
+  });
+
+  // Confirm before emailing, saying how many, how much, and whether any go out a second time.
+  // Once confirmed, further clicks are ignored so nobody gets the same email twice.
+  let sending = false;
+  document.getElementById("bulk-send-form").addEventListener("submit", (e) => {
+    if (sending) { e.preventDefault(); return; }
+    const chosen = checks.filter(c => c.checked);
+    const total = chosen.reduce((sum, c) => sum + parseFloat(c.dataset.total || 0), 0);
+    const again = chosen.filter(c => c.dataset.sent === "1").length;
+    let message = `Email ${chosen.length} invoice${chosen.length === 1 ? "" : "s"} totalling $${total.toFixed(2)}?`;
+    if (again) {
+      message += `\n\n${again} of them ${again === 1 ? "has" : "have"} already been sent and will be emailed again.`;
+    }
+    if (!confirm(message)) { e.preventDefault(); return; }
+    sending = true;
+    // Disable after the browser has collected the form data, or confirm_send is lost
+    setTimeout(() => { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }, 0);
+  });
+
+  // Coming back with the Back button can restore the page as it was left: re-enable it.
+  window.addEventListener("pageshow", () => {
+    sending = false;
+    sendBtn.textContent = "Send Selected Invoices";
+    updateCountAndButton();
   });
 
   // Prevent accidental form submit when opening modals from within the table
@@ -344,6 +434,34 @@ document.addEventListener("DOMContentLoaded", function () {
         </div>
         <div class="modal-footer">
           <button class="btn btn-success">Save</button>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="modal fade" id="voidModal" tabindex="-1" aria-labelledby="voidLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <form method="POST" id="voidForm">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="voidLabel">Void invoice <span id="voidNumber"></span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body d-grid gap-2">
+          <p class="m-0">It stays in the list for your records, but can't be emailed or marked paid. You can restore it later.</p>
+          <label class="form-label m-0" for="voidReason">Reason (optional)</label>
+          <input type="text" name="void_reason" id="voidReason" class="form-control" placeholder="e.g. Replaced by INV-2026-0113">
+          <input type="hidden" name="return_student_id" id="void-return-student">
+          <input type="hidden" name="return_start_date" id="void-return-start">
+          <input type="hidden" name="return_end_date" id="void-return-end">
+          <input type="hidden" name="return_status" id="void-return-status">
+          <input type="hidden" name="return_term" id="void-return-term">
+          <input type="hidden" name="return_year" id="void-return-year">
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-danger">Void invoice</button>
           <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
         </div>
       </div>

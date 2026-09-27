@@ -15,7 +15,7 @@ def lessons():
         lesson_time_str = request.form["lesson_time"]  # e.g. "2025-08-20T14:00"
         duration = int(request.form["duration"])
         rate = float(request.form["rate"])
-        repeat_weeks = int(request.form.get("repeat_weeks", 1))
+        repeat_weeks = max(1, int(request.form.get("repeat_weeks") or 1))  # blank means just this week
 
         start_dt = datetime.strptime(lesson_time_str, "%Y-%m-%dT%H:%M")
 

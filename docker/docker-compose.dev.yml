@@ -5,11 +5,9 @@ services:
       dockerfile: docker/Dockerfile
     container_name: music-invoice-dev
 
+    # TZ, PORT and everything else come from this file
     env_file:
       - ../.env.dev
-
-    environment:
-      - TZ=${TZ}
 
     volumes:
       - ../app:/app
@@ -23,7 +21,7 @@ services:
     restart: unless-stopped
 
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${PORT}/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:$${PORT:-8000}/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

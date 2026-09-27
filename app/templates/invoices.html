@@ -29,7 +29,7 @@
     </div>
   </div>
 
-  {% if lessons %}
+  {% if previewed %}
   <!-- Lessons table -->
   <div class="table-responsive mb-4">
     <table class="table table-striped table-bordered align-middle" id="lessons-table">
@@ -44,13 +44,15 @@
       </thead>
       <tbody>
         {% for l in lessons %}
-        <tr>
+        <tr class="lesson-row">
           <td><input type="text" name="lesson_date_{{ loop.index }}" value="{{ l.date_str }}" class="form-control"></td>
           <td><input type="number" name="lesson_duration_{{ loop.index }}" value="{{ l.duration }}" class="form-control duration"></td>
           <td><input type="number" step="0.01" name="lesson_rate_{{ loop.index }}" value="{{ l.rate }}" class="form-control rate"></td>
           <td><input type="number" step="0.01" name="lesson_subtotal_{{ loop.index }}" value="{{ l.subtotal }}" class="form-control subtotal text-end" readonly></td>
           <td><button type="button" class="btn btn-sm btn-danger delete-row">Delete</button></td>
         </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-center text-muted">No lessons in this period.</td></tr>
         {% endfor %}
       </tbody>
     </table>
@@ -60,13 +62,15 @@
   <h5>Extra Items</h5>
   <p class="text-muted">Optional — e.g. sheet music, exam fees</p>
   <div id="extra-items" class="mb-3">
-    {% for i in range(1,6) %}
+    {% set extra_rows = [5, extras|length + 1]|max %}
+    {% for i in range(1, extra_rows + 1) %}
+      {% set e = extras[i - 1] if i <= extras|length else none %}
       <div class="row g-2 mb-2 align-items-center extra-row">
         <div class="col-md-8">
-          <input type="text" name="extra_desc_{{ i }}" placeholder="Description" class="form-control">
+          <input type="text" name="extra_desc_{{ i }}" value="{{ e.desc if e else '' }}" placeholder="Description" class="form-control">
         </div>
         <div class="col-md-3">
-          <input type="number" step="0.01" name="extra_price_{{ i }}" placeholder="Price" class="form-control extra-price">
+          <input type="number" step="0.01" name="extra_price_{{ i }}" value="{{ '%.2f'|format(e.price) if e else '' }}" placeholder="Price" class="form-control extra-price">
         </div>
         <div class="col-md-1">
           <button type="button" class="btn btn-sm btn-danger delete-row">✕</button>
@@ -76,7 +80,11 @@
   </div>
 
   <input type="hidden" name="lesson_count" id="lesson_count" value="{{ lessons|length }}">
-  <input type="hidden" name="extra_count" id="extra_count" value="{{ extras|length if extras else 1 }}">
+  <input type="hidden" name="extra_count" id="extra_count" value="{{ extra_rows }}">
+  <!-- The student and dates the rows above were loaded for -->
+  <input type="hidden" name="previewed_student_id" value="{{ selected_student }}">
+  <input type="hidden" name="previewed_start_date" value="{{ start_date }}">
+  <input type="hidden" name="previewed_end_date" value="{{ end_date }}">
   {% endif %}
 
   <div class="d-flex justify-content-between align-items-center mt-4">
@@ -95,7 +103,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function recalcTotal() {
     let total = 0;
-    document.querySelectorAll("#lessons-table tbody tr").forEach(row => {
+    document.querySelectorAll("#lessons-table tbody tr.lesson-row").forEach(row => {
       const dur = parseFloat(row.querySelector(".duration")?.value || 0);
       const rate = parseFloat(row.querySelector(".rate")?.value || 0);
       const subEl = row.querySelector(".subtotal");
@@ -111,7 +119,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   function reindexRows() {
     // Lessons
-    const lessonRows = Array.from(document.querySelectorAll("#lessons-table tbody tr"));
+    const lessonRows = Array.from(document.querySelectorAll("#lessons-table tbody tr.lesson-row"));
     lessonRows.forEach((row, i) => {
       const idx = i + 1;
       row.querySelectorAll("input").forEach(inp => {
@@ -153,10 +161,29 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   });
 
-  // Before submit: ensure contiguous names & counts, and recompute totals
-  form.addEventListener("submit", () => {
+  // Before submit: ensure contiguous names & counts, and recompute totals.
+  // A second click while the first is still on its way is ignored (it made duplicate invoices).
+  let submitting = false;
+  form.addEventListener("submit", (e) => {
+    if (submitting) { e.preventDefault(); return; }
+    submitting = true;
     recalcTotal();
     reindexRows();
+    const btn = e.submitter;
+    if (btn) {
+      btn.dataset.label = btn.textContent;
+      // Disable after the browser has collected the form data, or the button's action is lost
+      setTimeout(() => { btn.disabled = true; btn.textContent = "Working…"; }, 0);
+    }
+  });
+
+  // Coming back with the Back button can restore the page as it was left: re-enable it.
+  window.addEventListener("pageshow", () => {
+    submitting = false;
+    form.querySelectorAll("button[type=submit]").forEach(b => {
+      b.disabled = false;
+      if (b.dataset.label) b.textContent = b.dataset.label;
+    });
   });
 
   recalcTotal();

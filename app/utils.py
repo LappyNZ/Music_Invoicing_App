@@ -1,9 +1,13 @@
 from datetime import datetime
 
 
-def build_invoice_filename(created_at_str: str, invoice_id: int) -> str:
+def invoice_number(created_at_str: str, invoice_id: int) -> str:
     year = created_at_str[:4] if created_at_str else str(datetime.now().year)
-    return f"INV-{year}-{invoice_id:04d}.pdf"
+    return f"INV-{year}-{invoice_id:04d}"
+
+
+def build_invoice_filename(created_at_str: str, invoice_id: int) -> str:
+    return f"{invoice_number(created_at_str, invoice_id)}.pdf"
 
 
 def nz_school_term(date: datetime) -> str:

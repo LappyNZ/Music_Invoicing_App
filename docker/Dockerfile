@@ -35,6 +35,11 @@ COPY app/ /app/
 # Start script (detects Flask/FastAPI)
 COPY start.sh /start.sh
 RUN chmod +x /start.sh && chown -R appuser:appuser /app
+
+# Which commit this image was built from (shown in the app's footer and at /version)
+ARG GIT_SHA=dev
+ENV APP_VERSION=$GIT_SHA
+
 USER appuser
 
 EXPOSE 8000
