@@ -1,74 +1,54 @@
 # Code review and roadmap
 
-*Reviewed September 2026 against `main` @ `32d6a47`. The repo history starts at "Initial public release" (12 Apr 2026), followed by the GHCR workflow (13 Apr 2026).*
+*Reviewed September 2026 against `main` @ `32d6a47`. The repo history starts at "Initial public release" (12 Apr 2026), followed by the GHCR workflow (13 Apr 2026). Updated after comparing with a copy of the Unraid server folder ([§2](#2-what-is-running-on-unraid-resolved)).*
 
-Contents: [1 Summary](#1-summary) · [2 What is running on Unraid?](#2-step-zero-what-is-running-on-unraid) · [3 Invoicing this week?](#3-invoicing-this-week-work-around-the-bugs-like-this) · [4 Confirmed bugs](#4-confirmed-bugs) · [5 Root causes](#5-structural-issues-root-causes) · [6 What's good](#6-whats-good-keep-it) · [7 UX proposal](#7-ux-proposal-organise-the-app-around-the-term) · [8 Roadmap](#8-roadmap) · [9 Decisions needed](#9-decisions-needed) · [Appendices](#appendix-a-proposed-data-model)
+Contents: [1 Summary](#1-summary) · [2 What is running on Unraid](#2-what-is-running-on-unraid-resolved) · [3 Invoicing this week?](#3-invoicing-this-week-work-around-the-bugs-like-this) · [4 Confirmed bugs](#4-confirmed-bugs) · [5 Root causes](#5-structural-issues-root-causes) · [6 What's good](#6-whats-good-keep-it) · [7 UX proposal](#7-ux-proposal-organise-the-app-around-the-term) · [8 Roadmap](#8-roadmap) · [9 Decisions needed](#9-decisions-needed) · [Appendices](#appendix-a-proposed-data-model)
 
 ---
 
 ## 1. Summary
 
 - **The foundations are fine, so no rewrite is needed.** Flask, SQLite and server-rendered pages are the right size for a one-teacher studio. The code is already split into routes and services, uses parameterised SQL throughout, and has good email safety switches.
-- **I found 21 problems ([§4](#4-confirmed-bugs)).** Most were reproduced by running the app the way Docker does (gunicorn) and clicking through it in a real browser. The "buttons that don't work" have two causes: a form nested inside another form, which makes the top **Mark sent** do nothing (B1), and the actions menu getting clipped by the table (B2).
+- **The server runs this repo's code.** Since April 2026 the Unraid container has used the GitHub image built from this repo ([§2](#2-what-is-running-on-unraid-resolved)), so every bug below is live. The live data backs several of them up: the Lessons page is already over 10 MB, some paid invoices are hidden because their students were deleted, and wrong invoices are being retired by marking them paid at $0 because there's no Void.
+- **I found 22 problems ([§4](#4-confirmed-bugs)).** Most were reproduced by running the app the way Docker does (gunicorn) and clicking through it in a real browser. The "buttons that don't work" have two causes: a form nested inside another form, which makes the top **Mark sent** do nothing (B1), and the actions menu getting clipped by the table (B2).
 - **The most dangerous bug for day-to-day use is B5.** On *Create*, if you preview one student, switch to another and press *Preview* again, the page keeps the **first student's lessons**. Pressing *Generate PDF* then bills the second student for them.
 - **The biggest structural gap: an invoice is stored only as a total plus a PDF file.** The lines (which lessons, which extras) are never saved. So an invoice can't be edited, re-issued or credited, and the app can't tell which lessons have already been billed. This is why changes after sending are done by hand, and it also blocks payment tracking and rentals. Fixing it is the core of the roadmap.
 - **The biggest UX opportunity is a term register.** Today invoices are built one student at a time, so the diary is read once per student. The register would be a students × weeks grid, pre-filled from each student's regular lesson, where you only mark the exceptions. That takes **one pass through the diary, week by week**, and then produces every draft invoice at once ([§7](#7-ux-proposal-organise-the-app-around-the-term)).
-- **Do this first:** find out exactly what is running on Unraid and take a backup ([§2](#2-step-zero-what-is-running-on-unraid)). Nothing records which version is deployed, and two compose-file bugs (UTC clock, "unhealthy" status) may be affecting the live container.
+- **Do this first:** keep the server backup safe and tidy the leftover files on the server ([§2](#2-what-is-running-on-unraid-resolved)). Then start Phase 1, fixes only ([§8](#8-roadmap)).
 
 ---
 
-## 2. Step zero: what is running on Unraid?
+## 2. What is running on Unraid (resolved)
 
-Run these in the Unraid terminal. If your container isn't called `music-invoice`, use the name that `docker ps` shows.
+Checked against a copy of the server folder (code and configuration only; the secrets in it were not opened, and nothing from it has been added to this repository).
 
-```sh
-# 1. Which container and image is it, and is it healthy?
-docker ps --format '{{.Names}}\t{{.Image}}\t{{.Status}}' | grep -i invoice
+**The container runs this repo's code**, specifically the GitHub image built from commit `32d6a47`:
 
-# 2. Where does its code come from? A line ending in "-> /app" means the code is a folder on the server (compose setup).
-docker inspect music-invoice --format '{{range .Mounts}}{{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+- The server's `docker-compose.prod.yml` (edited 13 April 2026, about 20 minutes after GitHub published the image) uses `image: ghcr.io/lappynz/music_invoicing_app:latest` and mounts only `data` and `secrets`. No source folder is mounted over the image.
+- Only one image has ever been published, and it was built from `32d6a47`.
+- The invoice PDFs agree. Up to early April they carry an older ReportLab signature; from early May onward they carry exactly the signature this repo's pinned ReportLab produces, with an identical layout.
 
-# 3. Fingerprint the code the container is actually running (ignores Windows/Linux line endings).
-docker exec music-invoice sh -c 'cd /app && for f in $(find . -type f \( -name "*.py" -o -name "*.html" -o -name "*.css" \) ! -path "*/__pycache__/*" | LC_ALL=C sort); do printf "%s  %s\n" "$(tr -d "\r" < "$f" | md5sum | cut -c1-32)" "$f"; done' | md5sum
-```
-
-- **`ab6cfbb6e36a1554d8f32cbd96c8be74`** means the live code is identical to this repo.
-- **Anything else** means it differs. Run command 3 again without the final `| md5sum` and compare the output with the list below to see which files changed. Before changing anything, copy the live code into this repo on a branch so that GitHub matches what is actually running.
-
-<details><summary>Per-file fingerprints for this repo (commit 32d6a47)</summary>
-
-```
-63e4956946bf45e4642dbccfc5cdf905  ./app.py
-11d16abbf62106298deb3650289fced7  ./config.py
-cdef21a27850329cf3f94207048fc7fe  ./db.py
-a320600c13b6d8ededf1ae1860ec0f2c  ./routes/invoices.py
-c88f0acf6fc59f97f01753d1561f7a34  ./routes/lessons.py
-b8c8ed51198d9abc129710817e0d406a  ./routes/students.py
-188ba2fc4fcd2691c11d075a959dad31  ./services/email_service.py
-285abdd3de84e468e36b5d5cb713e285  ./services/invoice_service.py
-10df20567b362e6db7a5decb5a3ff17c  ./services/pdf_service.py
-e0d73c0f1bd6251e636b16025839011c  ./static/style.css
-5dcff581ef0542c7615e9550cac42ba8  ./templates/base.html
-5c25bb528b32e850c1bd205df1913729  ./templates/index.html
-06d7024cf7f1aa7a3737df47974b0dba  ./templates/invoice_list.html
-c75fd73da2757edd6d2e34acb07ca616  ./templates/invoices.html
-43d9dd24087a68ff3b7c7b20d4424a48  ./templates/lessons.html
-b0ea22ed9950348a97429e7f08e50b78  ./templates/students.html
-91ba22fabfc93ed3c2a34f2bba6289e4  ./utils.py
-```
-</details>
+To confirm with one command on Unraid (it should print `32d6a4778dd7…`):
 
 ```sh
-# 4. Is the container clock on NZ time? If it prints UTC, bug B11 is live.
-docker exec music-invoice date
-
-# 5. Database structure and row counts (prints no personal data).
-docker exec music-invoice python -c "import sqlite3,os; c=sqlite3.connect(os.environ.get('DB_PATH','/data/music_school.db')); print(*[r[0] for r in c.execute('select sql from sqlite_master where sql is not null')], sep='\n\n'); print({t: c.execute(f'select count(*) from {t}').fetchone()[0] for t in ('students','lessons','invoices')})"
+docker inspect music-invoice --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
 ```
 
-**Back up before changing anything.** Copy the whole `data` folder (database and PDFs) and the `secrets` folder somewhere off the server, ideally with the container stopped. The database is the only record of the invoices, and NZ requires business records to be kept for 7 years.
+**Tidy the server folder.** Some of what's in it is unused, and some of it quietly matters:
 
-**Also check the Gmail setup.** In Google Cloud Console, go to APIs & Services, then OAuth consent screen. If *Publishing status* is **Testing**, Google expires the refresh token after 7 days and sending fails until you re-authorise. Switching it to **In production** stops that. For your own account you can click through the "unverified app" warning.
+| Item | Status | What to do |
+|---|---|---|
+| `app/`, `Dockerfile`, `docker-compose.yml`, `start.sh` | **Unused** leftovers from the old build-from-folder setup: a single `app.py` from October 2025. It contains personal details hard-coded in the source. | Move them into an `old/` folder, or delete them after keeping a private copy. **Never publish them.** |
+| `.env` (next to `docker-compose.prod.yml`) | **Used, but not obviously.** Docker Compose reads it to fill in `${TZ}` and `${PORT}`, which is why the timezone bug B11 doesn't affect your server. | Keep it until the B11 fix is deployed. |
+| `.env.prod` | Used: the container's settings. | Keep; private. |
+| `certs/` | Unused by the current setup. | Archive. |
+| `data/`, `secrets/` | Live data and the Gmail credentials. | Back up regularly and keep private. |
+
+**Backups:** a zip of that folder is a complete backup (database, PDFs and credentials). Keep it somewhere private, because it contains the Gmail token and bank details, and automate it (Phase 0). NZ requires business records to be kept for 7 years.
+
+**Gmail check:** in Google Cloud Console, go to APIs & Services, then OAuth consent screen. If *Publishing status* is **Testing**, Google expires the refresh token after 7 days and sending fails until you re-authorise. Switching it to **In production** stops that. For your own account you can click through the "unverified app" warning.
+
+**What changed when the server switched to this code in April:** the app behaves the same (the templates and CSS are identical apart from renamed routes, and so are most functions), with two exceptions. The email safety switches were added, and the invoice email wording changed (B22).
 
 ---
 
@@ -81,41 +61,43 @@ Term 3 ended on Friday 25 September, and Term 4 starts on Monday 12 October. Unt
 | Click **Create** in the menu to start fresh for each student. Don't switch student or dates on a page you have already previewed. | Otherwise the previous student's lessons are kept (B5). |
 | Add extra items **last**, just before *Generate PDF*. | Pressing *Preview* again wipes them (B6). |
 | Always fill in *Weeks Repeating* (type 1 for a single lesson). | Leaving it blank gives a server error (B3). |
-| When editing a lesson time, keep the exact format `2026-07-20 15:30`. | Any other format crashes that student's invoice preview (B4). |
+| When editing a lesson time, keep the exact format `2026-07-20 15:30`. | Other formats either crash that student's invoice preview or make the lesson silently vanish from invoices (B4). |
 | Set the filter to *Status = Draft* **before** *Select all*, then *Send Selected*. | Otherwise invoices already sent or paid are emailed again, with no confirmation (B9). |
 | Don't delete a student who has invoices. | Their invoices disappear from the list (B8). |
 | If a **⋯** menu is cut off, widen the filter so that invoice isn't in the last two rows. | The menu gets clipped (B2). |
 | Don't rely on *Mark sent* for the top-most draft invoice. | It does nothing, and there's no UI workaround (B1, a small fix). |
+| To retire a wrong invoice, keep marking it paid at $0 with a reference naming its replacement. | There's no Void yet (B18). This keeps it out of *Select all*, but it muddles the payment figures until Phase 1 adds Void. |
 
 ---
 
 ## 4. Confirmed bugs
 
-B1–B13, B17 and parts of B19 were reproduced or measured against a running copy of the app. B14 and B16 come from reading the code (and, for B14, the Google library's source). B15 needs real Gmail to reproduce. B18, B20 and B21 are gaps or risks rather than defects. **Severity:** 🔴 wrong result or lost data · 🟠 broken feature or crash · 🟡 annoyance, risk or robustness.
+B1–B13, B17 and parts of B19 were reproduced or measured against a running copy of the app. B14, B16 and B22 come from reading the code (and, for B14, the Google library's source). B15 needs real Gmail to reproduce. B18, B20 and B21 are gaps or risks rather than defects. **Live** notes come from aggregate checks of the server's database (counts and formats only). **Severity:** 🔴 wrong result or lost data · 🟠 broken feature or crash · 🟡 annoyance, risk or robustness.
 
 | # | | What happens | Where / why | Fix |
 |---|---|---|---|---|
 | B1 | 🟠 | **Mark sent** on the top-most draft invoice does nothing; it works on the other rows. | `invoice_list.html:193` is a `<form>` inside the bulk-send `<form>` (`:66`). Browsers drop the first nested form tag, so that button submits the bulk-send form instead. | Take the row actions out of the bulk form (e.g. `formaction` on the button). |
 | B2 | 🟠 | The **⋯** actions menu is cut off for invoices in the last rows of the table; with one or two invoices listed, it's unusable. | `.table { overflow: hidden }` (`style.css:55`) and the `.table-responsive` wrapper (`invoice_list.html:84`) both clip it. | `data-bs-popper-config='{"strategy":"fixed"}'` on the toggle (tested: fixes it). |
 | B3 | 🟠 | Adding a lesson with *Weeks Repeating* blank gives "Internal Server Error". | `lessons.py:18` runs `int("")`. | Default to 1. |
-| B4 | 🟠 | Editing a lesson time into any other format (e.g. `2026-07-20T15:30`) makes that student's invoice preview crash. | The edit box is free text (`lessons.html:112`), is saved as typed (`lessons.py:94-108`), and is parsed strictly (`invoices.py:62`). | Date-time picker, normalise on save, clean up existing rows. |
+| B4 | 🟠 | Editing a lesson time into any other format (e.g. `2026-07-20T15:30`) makes that student's invoice preview crash. Other text isn't recognised as a date at all, so that lesson silently drops out of invoices and filters. **Live:** one lesson is already stored this way (it looks like a leftover duplicate). | The edit box is free text (`lessons.html:112`), is saved as typed (`lessons.py:94-108`), and is parsed strictly (`invoices.py:62`). | Date-time picker, normalise on save, clean up existing rows. |
 | B5 | 🔴 | *Create*: after a preview, changing the student or dates and pressing *Preview* keeps the previous student's lessons, and *Generate PDF* bills the new student for them. | `invoices.py:33-50` reuses the posted rows whenever `lesson_count > 0`. | Reload from the DB when the student or dates change. |
 | B6 | 🟠 | Extra items disappear from the form when *Preview* is pressed again, and the total drops. | `invoices.html:63-76` always renders five empty rows. | Re-fill them from `extras`. |
 | B7 | 🟡 | The Lessons filter leaves out lessons on the *end* date. | `lessons.py:59-61` compares `'2026-07-20 15:00' <= '2026-07-20'` as text. | Compare `date(lesson_time)`, as the invoice query already does. |
-| B8 | 🔴 | Deleting a student removes their invoices from the invoice list (the rows stay orphaned in the DB) and deletes all their lessons. | `students.py:78-86`, `db.py:28` (`ON DELETE CASCADE`), `invoices.py:195` (inner join). | Archive students instead; block deletion when invoices exist. |
+| B8 | 🔴 | Deleting a student removes their invoices from the invoice list (the rows stay orphaned in the DB) and deletes all their lessons. **Live:** some paid 2025 invoices are already hidden this way, so any income total taken from the list comes up short. | `students.py:78-86`, `db.py:28` (`ON DELETE CASCADE`), `invoices.py:195` (inner join). | Archive students instead; block deletion when invoices exist. |
 | B9 | 🔴 | *Send Selected Invoices* has no confirmation, and *Select all* includes sent and paid invoices, so one click can re-email every family. | `invoice_list.html:72-81`, `invoices.py:252-305`. | "Send 27 invoices ($8,450)?" confirmation; skip paid invoices; make re-sending an explicit action. |
-| B10 | 🟡 | Times mix UTC and NZ time, and the invoice number is recomputed in three places from different clocks. An invoice created on NZ New Year's morning gets a PDF named `INV-2027-…` but is listed and emailed as `INV-2026-…`, so it shows "PDF file is missing" and can't be emailed. | UTC: `db.py:41`, `invoices.py:128`. Local: `invoices.py:290`, `:352`, `pdf_service.py:54`. Recomputed: `invoice_list.html:100`, `invoices.py:400`, `utils.py:4-6`. | Store the invoice number and PDF filename when the invoice is created; use one time convention. |
-| B11 | 🟠 | In the compose files, `TZ=${TZ}` and the healthcheck's `${PORT}` are filled in from the **Unraid shell**, not from `.env.prod`. Unless the shell sets them, the container gets `TZ=""` (UTC), so PDFs made before midday (1 pm in summer) show yesterday's *Date Issued*. The healthcheck also calls port 80, so Docker marks the container "unhealthy". | `docker-compose.prod.yml:11-12, 26` (dev file too). Checked with `docker compose config`. | Drop the `environment:` override; use `$${PORT}` or `8000`. |
+| B10 | 🟡 | Times mix UTC and NZ time, and the invoice number is recomputed in three places from different clocks. An invoice created on NZ New Year's morning gets a PDF named `INV-2027-…` but is listed and emailed as `INV-2026-…`, so it shows "PDF file is missing" and can't be emailed. **Live:** `paid_at` is stored in three different formats. | UTC: `db.py:41`, `invoices.py:128`. Local: `invoices.py:290`, `:352`, `pdf_service.py:54`. Recomputed: `invoice_list.html:100`, `invoices.py:400`, `utils.py:4-6`. | Store the invoice number and PDF filename when the invoice is created; use one time convention. |
+| B11 | 🟡 | In the compose files, `TZ=${TZ}` and the healthcheck's `${PORT}` are filled in when Compose starts, from the shell or a `.env` file beside the compose file, **not** from `.env.prod`. Without them the container gets `TZ=""` (UTC), so PDFs made before midday (1 pm in summer) show yesterday's *Date Issued*, and the healthcheck calls port 80, so Docker marks the container "unhealthy". **Not live on your server:** the `.env` beside the compose file supplies both (PDFs generated at 9 am carry the right date). It does affect the repo's `docker/` layout, and would affect the server if that `.env` were removed. | `docker-compose.prod.yml:11-12, 26` (dev file too). Checked with `docker compose config`. | Default the values in the compose file (`${TZ:-Pacific/Auckland}`, `$${PORT}`). |
 | B12 | 🟠 | Database setup and migrations never run in Docker. On a fresh database every page errors (`no such table`), and new columns added in future will never reach the live DB. | `init_db()` only runs under `python app.py` (`app.py:43-45`), but the container starts gunicorn (`start.sh`). | Run versioned migrations when the container starts. |
 | B13 | 🟡 | `scripts/reset_dev_db.py` builds a database the app can't use: it has no `lessons` table, and `invoices` is missing its dates, total and `created_at`. Even running the app's own `init_db()` afterwards leaves the invoice list broken (`no such column: invoices.start_date`). | `reset_dev_db.py:15-36` | Reuse `init_db()` and seed sample data. |
 | B14 | 🟠 | Gmail re-authorisation runs *inside a web request*. If the token is missing or revoked, the app opens a listener on port 8090 and waits (gunicorn kills it after 60 s). Google also redirects the browser to `http://0.0.0.0:8090/`, which can't reach the container. | `email_service.py:26-39`. | Separate "Connect Gmail" step, or SMTP with a Google app password. |
 | B15 | 🟡 | *(Not reproduced; needs real Gmail.)* A bulk send runs in one web request. With enough invoices it can pass gunicorn's 60 s timeout (`start.sh:7`), leaving the batch half-sent with an error page. A new Gmail client is also built for every email. | `invoices.py:271-305`, `email_service.py:93`. | Send one invoice per request, with a progress bar. |
 | B16 | 🟡 | The email asks payers to use the student's name as the reference; the PDF asks for "name + INV-2026-0042". NZ bank reference fields hold 12 characters, and `INV-2026-0042` has 13. Inconsistent references make payments harder to match. | `invoice_service.py:30`, `pdf_service.py:96`. | One short reference everywhere, e.g. `INV26-0042`. |
-| B17 | 🟡 | The Lessons page lists every lesson ever stored, each with two hidden dialogs containing the whole student list. With two years × 30 students that's **16.5 MB of HTML, 4,800 dialogs and 72,000 `<option>` tags** (measured), which will be very slow, especially on a tablet. | `lessons.py:39-65`, `lessons.html:84-153`. | Default to the current term; use one shared edit dialog. |
-| B18 | 🟠 | Missing features rather than bugs: you can't undo *Mark paid*, record a part-payment, or void a wrong invoice (it stays a draft and gets caught by *Select all*), and you can't change an invoice once it's generated. | | Covered in Phases 1 and 2. |
+| B17 | 🟡 | The Lessons page lists every lesson ever stored, each with two hidden dialogs containing the whole student list. With two years × 30 students that's **16.5 MB of HTML, 4,800 dialogs and 72,000 `<option>` tags** (measured), which will be very slow, especially on a tablet. **Live:** your Lessons page is already over 10 MB. | `lessons.py:39-65`, `lessons.html:84-153`. | Default to the current term; use one shared edit dialog. |
+| B18 | 🟠 | Missing features rather than bugs: you can't undo *Mark paid*, record a part-payment, or void a wrong invoice (it stays a draft and gets caught by *Select all*), and you can't change an invoice once it's generated. **Live:** wrong invoices are being retired by marking them paid at $0, which distorts the payment figures, and part-payments are common. | | Covered in Phases 1 and 2. |
 | B19 | 🟡 | Smaller robustness issues: text in `<angle brackets>` silently disappears from PDFs (ReportLab markup, `pdf_service.py:58`); long extra-item descriptions don't wrap (`:76`); non-numeric amounts cause server errors (`invoices.py:132,144`); nothing checks that start date ≤ end date; *Preview* with no lessons shows nothing instead of a message; double-clicking *Generate PDF* can create a duplicate invoice; the "(blank)" school filter can't be chosen (`students.html:17-19`). | | Phase 1. |
 | B20 | 🟡 | Security is acceptable on a trusted home network, but needs fixing before remote access or card payments. There's no login and no CSRF protection, so any web page open on a device on the LAN could submit the app's forms. The `SECRET_KEY` falls back to a default value. | All routes; `config.py:11`. | Phase 2. |
-| B21 | 🟡 | The deployment is ambiguous. The prod compose file builds locally and mounts the source folder over the image (`docker-compose.prod.yml:15`), while GitHub Actions publishes an image that nothing uses, and the UI shows no version. This is why it's unclear what is live. | | One deployment path; version in the footer. |
+| B21 | 🟡 | The deployment is ambiguous. The repo's prod compose file builds locally and mounts the source folder over the image, but the server pulls the GitHub image using its own compose file, which isn't in the repo. The server folder also still holds the old build files, and the UI shows no version. That is why it was unclear what is live. | `docker/docker-compose.prod.yml:15`; the server folder. | Make the repo's compose file match the server's image-based one; show the version in the footer. |
+| B22 | 🟡 | The invoice email changed when the server switched to this code in April. The old email ended with a full signature (qualification, address, phone numbers, bank name) and asked for the reference "name + invoice file name". The current one ends with just the sender's name and asks for the student's name as the reference, which also differs from the PDF (B16). | `invoice_service.py:24-33`. | Put the signature in `.env.prod` (e.g. `EMAIL_SIGNATURE`) and use one reference everywhere. |
 
 Minor tidy-ups: the PDF doesn't show the bill-to parent or the business name as text (`BUSINESS_NAME` in `config.py` is unused, and the name is hard-coded in `base.html`). `requirements.txt` is saved as UTF-16: pip copes, but GitHub's dependency tools don't. The Docker image installs `build-essential` and `libpq-dev`, which nothing needs.
 
@@ -129,7 +111,7 @@ Minor tidy-ups: the PDF doesn't show the bill-to parent or the business name as 
 4. **Money is stored as floating point, timestamps use mixed zones, and identifiers are derived rather than stored** (B10). **Fix:** integer cents, one timestamp convention, stored invoice numbers.
 5. **Slow work happens inside web requests** (B14, B15).
 6. **There are no tests.** Every bug above is cheap to pin down with one. **Fix:** pytest with Flask's test client, plus a few browser checks (Playwright) for the button-level bugs, run by CI before the image is published.
-7. **There's no single deployment path and no visible version** (B21).
+7. **The deployment isn't described in the repo, and no version is visible** (B21). The server already uses the right approach (pull the GitHub image), but that setup exists only on the server.
 
 ---
 
@@ -189,17 +171,17 @@ The navigation would become **Home · Register · Invoices · Payments · Studen
 Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a weekend, **L** several weekends. Phases 0 and 1 are prerequisites for everything else. Phase 2 unlocks Phases 3 and 4 (which can be done in either order), and Phase 5 builds on Phase 4.
 
 ### Phase 0: Know what's live and protect the data (S, before any code change)
-- 0.1 Run the [§2](#2-step-zero-what-is-running-on-unraid) checks. If the live code differs from this repo, commit it to a branch first.
-- 0.2 Back up `data/` and `secrets/`. Set up a nightly automatic backup (e.g. the Unraid *User Scripts* plugin, keeping 30 days, copied off the server).
-- 0.3 Check the container clock and the Gmail consent screen status.
+- 0.1 ✅ Find out what's live: it's this repo's code ([§2](#2-what-is-running-on-unraid-resolved)). Optionally confirm with the one-line `docker inspect`.
+- 0.2 Keep the server zip as a private backup. Set up a nightly automatic backup of `data/` and `secrets/` (e.g. the Unraid *User Scripts* plugin, keeping 30 days, copied off the server).
+- 0.3 Tidy the server folder: archive the unused old build files and `certs/`, but **keep `.env`** until the B11 fix is deployed ([§2](#2-what-is-running-on-unraid-resolved)).
+- 0.4 Check the Gmail consent screen status.
 
 ### Phase 1: Stabilise (M): fixes only, no new behaviour
 - 1.1 **Test harness:** pytest, Flask test client and a sample-data seed; fix `reset_dev_db.py` (B13). Every fix below comes with a test.
 - 1.2 **Deployment:**
   - Run migrations at start-up (B12).
-  - Fix the compose TZ and healthcheck settings (B11).
   - Show the version (git commit) in the footer and at `/version`.
-  - Pick one deployment path (B21). Recommended: the GHCR image, tagged per commit, with no source folder mounted over it.
+  - Put the server's image-based compose file into the repo, with safe defaults for `TZ`/`PORT` (B11, B21). Deploying an update then means `docker compose pull && docker compose up -d` on Unraid; pin a commit tag to roll back.
   - Save `requirements.txt` as UTF-8, slim down the image, and have CI run the tests before publishing.
 - 1.3 **Buttons:** B1, B2.
 - 1.4 **Lessons:** B3; B4 (and clean up existing times); B7; open the Lessons page on the current term by default (B17).
@@ -207,7 +189,9 @@ Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a
 - 1.6 **Safe sending:** confirmation, skip paid invoices, explicit re-send (B9); one email per request with progress (B15); Gmail authorisation outside web requests (B14).
 - 1.7 **Keep history:** archive students instead of deleting them, and keep their invoices visible (B8).
 - 1.8 **Stable invoice numbers:** store the invoice number and PDF filename, with consistent timestamps (B10). Optionally switch to a short number like `INV26-0042` and one payment reference everywhere (B16); this needs your OK (Q6).
-- 1.9 **Undo:** undo *Mark paid*; void an invoice (part of B18).
+- 1.9 **Void and undo** (part of B18; high value, because the $0 "Mark paid" workaround is already in use): void an invoice, optionally pointing to its replacement; undo *Mark paid*. Existing $0 "payments" become voids.
+- 1.10 **Email wording:** signature from settings, one consistent payment reference (B16, B22).
+- 1.11 **Data clean-up migration:** repair the unreadable lesson time, normalise `paid_at` formats, and show invoices of deleted students again as archived (B4, B8, B10).
 
 ### Phase 2: Term-based workflow (L): the big UX improvement
 - 2.1 **Data model:** terms (seeded 2026–27), each student's regular slot, rate, active flag and billing contact(s), lesson status, `invoice_lines`, and money in cents ([Appendix A](#appendix-a-proposed-data-model)).
@@ -244,10 +228,10 @@ Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a
 
 ## 9. Decisions needed
 
-1. **Unraid check** ([§2](#2-step-zero-what-is-running-on-unraid)): is the live code the same as this repo, or different?
-2. **Siblings:** do any families have more than one student? Should they get one invoice per family per term, or one per student?
-3. **Billing rules:** do you invoice in advance (start of term, credit missed lessons afterwards) or in arrears (end of term, from the register)? Which absences are charged (e.g. short notice)? How are makeup lessons handled?
-4. **Rates:** is there one rate per student? Do rates change at the start of the year?
+1. ~~**Unraid check**~~: answered. The server runs this repo's code ([§2](#2-what-is-running-on-unraid-resolved)).
+2. **Siblings:** the data shows very few families with more than one student, so one invoice per student looks fine. Say so if you'd prefer family invoices.
+3. **Billing rules:** the data shows you invoice at the end of each term (in arrears), which the register design fits. Still open: which absences are charged (e.g. short notice)? How are makeup lessons handled? Are lessons that fall in the school holidays real (e.g. makeups to bill) or leftovers from *Weeks Repeating*?
+4. **Rates:** some students' rates changed partway through the data. Do rates change at a set time (e.g. the start of the year)?
 5. **Rentals:** are they charged per term or per month? Is there a deposit? Do rentals continue through the holidays?
 6. **Invoice numbers:** OK to switch to a short format like `INV26-0042` for new invoices (old ones unchanged)?
 7. **Email:** does Gmail sending work reliably at the moment, or do you often have to re-authorise?
@@ -284,4 +268,5 @@ payment_allocations payment_id, invoice_id, amount_cents
 - I ran the app under gunicorn with a fresh database (as the container does), and with Flask's test client against made-up students and lessons, with email disabled.
 - I drove the UI in Chromium (via Playwright), clicking the actual buttons and menus, and measured page sizes with two years of made-up data.
 - I checked the compose files' variable substitution with `docker compose config`.
-- **Not tested:** real Gmail sending, and the live Unraid deployment, which isn't reachable from here.
+- I compared a copy of the Unraid server folder with this repo: the code and configuration files, and the layout and metadata of the generated PDFs. The secrets in it were not opened. I checked the live database with aggregate queries only (counts and formats); nothing from the server copy was added to this repository.
+- **Not tested:** real Gmail sending, and the running container itself (it isn't reachable from here).
