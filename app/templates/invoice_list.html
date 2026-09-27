@@ -10,7 +10,7 @@
       <option value="">All students</option>
       {% for s in student_options %}
         <option value="{{ s.id }}" {% if selected_student == s.id|string %}selected{% endif %}>
-          {{ s.name }}
+          {{ s.name }}{{ ' (archived)' if not s.active }}
         </option>
       {% endfor %}
     </select>
@@ -99,13 +99,14 @@
       </thead>
       <tbody>
         {% for inv in invoices %}
-        {% set invoice_number = "INV-" + inv.created_at[:4] + "-" + ("%04d"|format(inv.id)) %}
+        {% set invoice_number = invoice_number_of(inv) %}
         {% set st = (inv.status or ('sent' if inv.emailed_at else 'draft')) %}
         <tr class="{{ 'text-muted' if st == 'void' }}">
           <!-- Select (paid and void invoices can't be emailed) -->
           <td class="text-center">
             <input type="checkbox" name="invoice_id" value="{{ inv.id }}" class="row-check"
                    data-total="{{ '%.2f'|format(inv.total or 0) }}" data-sent="{{ 1 if st == 'sent' else 0 }}"
+                   data-number="{{ invoice_number }}"
                    {% if st in ('paid', 'void') %}disabled title="{{ st|capitalize }} invoices can't be emailed"{% endif %}>
           </td>
 
@@ -129,7 +130,7 @@
           <!-- Status (compact badge with tooltip; includes Created) -->
           <td class="align-middle">
             {% set tt_lines = [] %}
-            {% if inv.created_at %}{% set _ = tt_lines.append('Created: ' ~ inv.created_at) %}{% endif %}
+            {% if inv.created_at %}{% set _ = tt_lines.append('Created: ' ~ (inv.created_at|local_time)) %}{% endif %}
             {% if st == 'paid' %}
               {% if inv.paid_at %}{% set _ = tt_lines.append('Paid: ' ~ inv.paid_at) %}{% endif %}
               {% if inv.paid_amount is not none %}{% set _ = tt_lines.append('Amount: $' ~ ("%.2f"|format(inv.paid_amount))) %}{% endif %}
@@ -231,6 +232,15 @@
                   </button>
                 </li>
                 {% endif %}
+
+                {% if st == 'paid' %}
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                  <button type="submit" form="unpaid-{{ inv.id }}" class="dropdown-item">
+                    <i class="bi bi-arrow-counterclockwise me-2"></i>Mark unpaid
+                  </button>
+                </li>
+                {% endif %}
               </ul>
             </div>
           </td>
@@ -247,7 +257,7 @@
   </div>
 </form>
 
-<!-- Row action forms, submitted by the "Mark sent" / "Restore" buttons in each row's menu -->
+<!-- Row action forms, submitted by the "Mark sent", "Restore" and "Mark unpaid" buttons in each row's menu -->
 {% macro return_fields() -%}
   <input type="hidden" name="return_student_id" value="{{ selected_student or '' }}">
   <input type="hidden" name="return_start_date" value="{{ start_date or '' }}">
@@ -265,6 +275,12 @@
 </form>
 {% elif st == 'void' %}
 <form id="restore-{{ inv.id }}" method="POST" action="{{ url_for('invoices_bp.restore_invoice', invoice_id=inv.id) }}" hidden>
+  {{ return_fields() }}
+</form>
+{% elif st == 'paid' %}
+<form id="unpaid-{{ inv.id }}" method="POST" action="{{ url_for('invoices_bp.mark_unpaid', invoice_id=inv.id) }}" hidden
+      data-number="{{ invoice_number_of(inv) }}"
+      onsubmit="return confirm('Remove the payment recorded for ' + this.dataset.number + '? It goes back to Sent (or Draft if it was never emailed).')">
   {{ return_fields() }}
 </form>
 {% endif %}
@@ -356,9 +372,11 @@ document.addEventListener("DOMContentLoaded", function () {
 
   // Confirm before emailing, saying how many, how much, and whether any go out a second time.
   // Once confirmed, further clicks are ignored so nobody gets the same email twice.
+  // (Without JavaScript the form still works, sending them all in one go.)
   let sending = false;
   document.getElementById("bulk-send-form").addEventListener("submit", (e) => {
-    if (sending) { e.preventDefault(); return; }
+    e.preventDefault();
+    if (sending) return;
     const chosen = checks.filter(c => c.checked);
     const total = chosen.reduce((sum, c) => sum + parseFloat(c.dataset.total || 0), 0);
     const again = chosen.filter(c => c.dataset.sent === "1").length;
@@ -366,11 +384,73 @@ document.addEventListener("DOMContentLoaded", function () {
     if (again) {
       message += `\n\n${again} of them ${again === 1 ? "has" : "have"} already been sent and will be emailed again.`;
     }
-    if (!confirm(message)) { e.preventDefault(); return; }
+    if (!confirm(message)) return;
     sending = true;
-    // Disable after the browser has collected the form data, or confirm_send is lost
-    setTimeout(() => { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }, 0);
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Sending…";
+    sendInTurn(chosen);
   });
+
+  // Send the invoices one request at a time, showing progress, and stop if Gmail isn't connected.
+  async function sendInTurn(chosen) {
+    const modalEl = document.getElementById("sendProgressModal");
+    const text = document.getElementById("sendProgressText");
+    const bar = document.getElementById("sendProgressBar");
+    const log = document.getElementById("sendProgressLog");
+    const stop = document.getElementById("sendProgressStop");
+    const done = document.getElementById("sendProgressDone");
+    const counts = { sent: 0, notSent: 0, failed: 0 };
+    const warnOnLeave = (e) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warnOnLeave);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+
+    function addLine(symbol, message, className) {
+      const li = document.createElement("li");
+      li.className = className;
+      li.textContent = `${symbol} ${message}`;
+      log.appendChild(li);
+    }
+
+    let stopped = "";
+    for (let i = 0; i < chosen.length; i++) {
+      text.textContent = `Sending ${i + 1} of ${chosen.length}…`;
+      const url = "{{ url_for('invoices_bp.send_one_invoice', invoice_id=0) }}".replace(/0$/, chosen[i].value);
+      let response, result;
+      try {
+        response = await fetch(url, { method: "POST" });
+      } catch (err) {
+        stopped = "The app couldn't be reached, so sending stopped. Check which invoices show as Sent before sending the rest.";
+        break;
+      }
+      try {
+        result = await response.json();
+      } catch (err) {
+        result = { status: "failed", message: `${chosen[i].dataset.number}: the app hit an error (${response.status}).` };
+      }
+      if (result.status === "gmail_not_connected") { stopped = result.message; break; }
+      if (result.status === "sent") { counts.sent++; addLine("✓", result.message, ""); }
+      else if (result.status === "failed") { counts.failed++; addLine("✗", result.message, "fw-semibold"); }
+      else { counts.notSent++; addLine("–", result.message, ""); }
+      bar.style.width = `${Math.round((i + 1) / chosen.length * 100)}%`;
+    }
+
+    window.removeEventListener("beforeunload", warnOnLeave);
+    const summary = `Emailed: ${counts.sent}, Not sent: ${counts.notSent}, Failed: ${counts.failed}`;
+    if (stopped) {
+      text.textContent = `Stopped. ${summary}`;
+      stop.textContent = stopped;
+      stop.classList.remove("d-none");
+      bar.classList.add("bg-danger");
+    } else {
+      text.textContent = `Finished. ${summary}`;
+      bar.classList.add(counts.failed ? "bg-warning" : "bg-success");
+    }
+    done.disabled = false;
+    done.focus();
+  }
+
+  // Closing the progress window reloads the list, so the statuses are up to date.
+  document.getElementById("sendProgressDone").addEventListener("click", () => location.reload());
 
   // Coming back with the Back button can restore the page as it was left: re-enable it.
   window.addEventListener("pageshow", () => {
@@ -406,6 +486,28 @@ document.addEventListener("DOMContentLoaded", function () {
 {% endblock %}
 
 {% block modals %}
+<div class="modal fade" id="sendProgressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
+     aria-labelledby="sendProgressLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="sendProgressLabel">Sending invoices</h5>
+      </div>
+      <div class="modal-body">
+        <p id="sendProgressText" class="mb-2" aria-live="polite">Starting…</p>
+        <div class="progress mb-3" role="progressbar" aria-label="Sending progress">
+          <div class="progress-bar" id="sendProgressBar" style="width: 0%"></div>
+        </div>
+        <div class="alert alert-danger d-none" id="sendProgressStop"></div>
+        <ul class="list-unstyled small mb-0" id="sendProgressLog"></ul>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" id="sendProgressDone" disabled>Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal fade" id="markPaidModal" tabindex="-1" aria-labelledby="markPaidLabel" aria-hidden="true">
   <div class="modal-dialog">
     <form method="POST" id="markPaidForm">
@@ -452,7 +554,7 @@ document.addEventListener("DOMContentLoaded", function () {
         <div class="modal-body d-grid gap-2">
           <p class="m-0">It stays in the list for your records, but can't be emailed or marked paid. You can restore it later.</p>
           <label class="form-label m-0" for="voidReason">Reason (optional)</label>
-          <input type="text" name="void_reason" id="voidReason" class="form-control" placeholder="e.g. Replaced by INV-2026-0113">
+          <input type="text" name="void_reason" id="voidReason" class="form-control" placeholder="e.g. Replaced by INV26-0113">
           <input type="hidden" name="return_student_id" id="void-return-student">
           <input type="hidden" name="return_start_date" id="void-return-start">
           <input type="hidden" name="return_end_date" id="void-return-end">

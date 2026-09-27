@@ -5,8 +5,8 @@ from email.message import EmailMessage
 from email.utils import formataddr
 
 from flask import current_app
+from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 
@@ -14,29 +14,28 @@ from google.auth.transport.requests import Request
 GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
 
+class GmailNotConnected(Exception):
+    """There's no usable Gmail sign-in. It's set up outside the app: python -m gmail_auth"""
+
+
 def gmail_service():
     token_path = current_app.config["GOOGLE_OAUTH_TOKEN"]
-    credentials_path = current_app.config["GOOGLE_OAUTH_CREDENTIALS"]
-    oauth_port = int(current_app.config["OAUTH_PORT"])
 
     creds = None
     if os.path.exists(token_path):
-        creds = Credentials.from_authorized_user_file(token_path, GMAIL_SCOPES)
+        try:
+            creds = Credentials.from_authorized_user_file(token_path, GMAIL_SCOPES)
+        except ValueError as e:
+            raise GmailNotConnected(f"The saved Gmail sign-in can't be read ({e}).") from e
 
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+        # Signing in needs a person at a browser, so it can't happen in the middle of a web request.
+        if not (creds and creds.refresh_token):
+            raise GmailNotConnected("Gmail isn't connected to the app.")
+        try:
             creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                credentials_path,
-                GMAIL_SCOPES,
-            )
-            creds = flow.run_local_server(
-                host="0.0.0.0",
-                port=oauth_port,
-                prompt="consent",
-                open_browser=False,
-            )
+        except RefreshError as e:
+            raise GmailNotConnected(f"Gmail needs to be connected again ({e}).") from e
 
         with open(token_path, "w") as token:
             token.write(creds.to_json())

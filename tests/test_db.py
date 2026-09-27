@@ -8,26 +8,16 @@ from pathlib import Path
 import pytest
 
 from db import init_db
+from live_schema import make_live_shaped_db
 
 APP_DIR = Path(__file__).resolve().parent.parent / "app"
 
-# Structure of the production database as of September 2026 (no data).
-LIVE_SCHEMA_2026_09 = """
-CREATE TABLE students ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL, parent TEXT, phone TEXT , school TEXT);
-CREATE TABLE lessons ( id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER NOT NULL, lesson_time TEXT NOT NULL, duration INTEGER NOT NULL, rate REAL NOT NULL, FOREIGN KEY(student_id) REFERENCES students(id) ON DELETE CASCADE );
-CREATE TABLE invoices ( id INTEGER PRIMARY KEY AUTOINCREMENT, student_id INTEGER, start_date TEXT, end_date TEXT, total REAL, emailed_at TEXT, emailed_to TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP , status TEXT DEFAULT 'draft', paid_at TEXT, paid_amount REAL, paid_ref TEXT);
-CREATE INDEX idx_students_school ON students(school);
-CREATE INDEX idx_invoices_status ON invoices(status);
-"""
 
-
-def make_live_shaped_db(path):
-    conn = sqlite3.connect(path)
-    conn.executescript(LIVE_SCHEMA_2026_09)
-    conn.execute("INSERT INTO students (name, email) VALUES ('Alice', 'a@example.com')")
-    conn.execute("INSERT INTO invoices (student_id, total, status) VALUES (1, 300, 'paid')")
-    conn.commit()
-    conn.close()
+def make_live_db_with_rows(path):
+    make_live_shaped_db(path, """
+        INSERT INTO students (name, email) VALUES ('Alice', 'a@example.com');
+        INSERT INTO invoices (student_id, total, status) VALUES (1, 300, 'paid');
+    """)
 
 
 def columns(path, table):
@@ -46,7 +36,7 @@ def test_creates_all_tables_on_a_fresh_database(app):
 
 def test_upgrades_the_live_database_without_losing_data(app, tmp_path):
     path = str(tmp_path / "live.db")
-    make_live_shaped_db(path)
+    make_live_db_with_rows(path)
     app.config["DB_PATH"] = path
     with app.app_context():
         init_db()
@@ -75,7 +65,7 @@ def _init_db_in_child(db_path, barrier, results):
 def test_workers_starting_together_do_not_collide(tmp_path):
     # gunicorn starts several workers at once, and each one runs init_db.
     path = str(tmp_path / "live.db")
-    make_live_shaped_db(path)
+    make_live_db_with_rows(path)
     ctx = multiprocessing.get_context("fork")
     workers = 6
     barrier, results = ctx.Barrier(workers), ctx.Queue()

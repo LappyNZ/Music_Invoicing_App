@@ -1,4 +1,9 @@
 {% extends "base.html" %}
+{% macro return_fields() %}
+  <input type="hidden" name="return_show" value="{{ show if show != 'current' else '' }}">
+  <input type="hidden" name="return_school" value="{{ selected_school or '' }}">
+  <input type="hidden" name="return_q" value="{{ q or '' }}">
+{% endmacro %}
 {% block content %}
 <h2>Student Management</h2>
 <form method="POST" class="mb-3">
@@ -11,11 +16,20 @@
 </form>
 
 <form method="get" class="filters" style="margin-bottom:1rem; display:flex; gap:.5rem; align-items:center;">
+  <label>Show:
+    <select name="show" onchange="this.form.submit()">
+      <option value="current" {{ 'selected' if show == 'current' }}>Current students</option>
+      <option value="archived" {{ 'selected' if show == 'archived' }}>Archived ({{ archived_count }})</option>
+      <option value="all" {{ 'selected' if show == 'all' }}>All</option>
+    </select>
+  </label>
+
   <label>School:
     <select name="school" onchange="this.form.submit()">
       <option value="">All schools</option>
       {% for s in school_options %}
-        <option value="{{ s }}" {{ 'selected' if selected_school == s else '' }}>
+        {% set value = s if s else blank_school %}
+        <option value="{{ value }}" {{ 'selected' if selected_school == value else '' }}>
           {{ s if s else '— (blank) —' }}
         </option>
       {% endfor %}
@@ -28,19 +42,43 @@
 </form>
 
 <table class="table table-striped">
-  <tr><th>Student's Name</th><th>Email</th><th>Parent's Name</th><th>Phone</th><th>School</th><th>Actions</th></tr>
+  <tr><th>Student's Name</th><th>Email</th><th>Parent's Name</th><th>Phone</th><th>School</th><th class="text-end">Invoices</th><th>Actions</th></tr>
   {% for student in students %}
-  <tr>
-    <td>{{ student.name }}</td>
+  <tr class="{{ 'text-muted' if not student.active }}">
+    <td>
+      {{ student.name }}
+      {% if not student.active %}<span class="badge bg-secondary ms-1" title="Archived {{ student.archived_at or '' }}">Archived</span>{% endif %}
+    </td>
     <td>{{ student.email }}</td>
     <td>{{ student.parent }}</td>
     <td>{{ student.phone }}</td>
     <td>{{ student.school }}</td>
-    <td>
+    <td class="text-end">
+      {% if student.invoice_count %}
+        <a href="{{ url_for('invoices_bp.invoice_list', student_id=student.id) }}">{{ student.invoice_count }}</a>
+      {% else %}0{% endif %}
+    </td>
+    <td class="text-nowrap">
       <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editStudentModal{{ student.id }}">Edit</button>
-      <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteStudentModal{{ student.id }}">Delete</button>
+      {% if student.active %}
+        <form method="POST" action="{{ url_for('students_bp.archive_student', student_id=student.id) }}" class="d-inline">
+          {{ return_fields() }}
+          <button type="submit" class="btn btn-sm btn-outline-secondary"
+                  title="Stops them being offered for new lessons and invoices. Their lessons and invoices are kept.">Archive</button>
+        </form>
+      {% else %}
+        <form method="POST" action="{{ url_for('students_bp.restore_student', student_id=student.id) }}" class="d-inline">
+          {{ return_fields() }}
+          <button type="submit" class="btn btn-sm btn-outline-success">Restore</button>
+        </form>
+      {% endif %}
+      {% if not student.invoice_count %}
+        <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteStudentModal{{ student.id }}">Delete</button>
+      {% endif %}
     </td>
   </tr>
+  {% else %}
+  <tr><td colspan="7" class="text-center text-muted">No students match these filters.</td></tr>
   {% endfor %}
 </table>
 {% endblock %}
@@ -53,6 +91,7 @@
     <form method="POST"
           action="{{ url_for('students_bp.edit_student', student_id=student.id) }}"
           data-debug="edit-student-{{ student.id }}">
+      {{ return_fields() }}
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title">Edit Student</h5>
@@ -74,12 +113,14 @@
   </div>
 </div>
 
-<!-- Delete Modal -->
+<!-- Delete Modal (only for students without invoices, e.g. added by mistake) -->
+{% if not student.invoice_count %}
 <div class="modal fade" id="deleteStudentModal{{ student.id }}" tabindex="-1">
   <div class="modal-dialog">
     <form method="POST"
           action="{{ url_for('students_bp.delete_student', student_id=student.id) }}"
           data-debug="delete-student-{{ student.id }}">
+      {{ return_fields() }}
       <div class="modal-content">
         <div class="modal-header">
           <h5 class="modal-title">Delete Student</h5>
@@ -87,7 +128,10 @@
         </div>
         <div class="modal-body">
           Are you sure you want to delete <strong>{{ student.name }}</strong>?<br>
-          <small>(All their lessons will also be deleted.)</small>
+          <small>
+            {% if student.lesson_count %}Their {{ student.lesson_count }} lesson{{ 's' if student.lesson_count != 1 }} will also be deleted. {% endif %}
+            This can't be undone. To stop teaching someone but keep their history, use <strong>Archive</strong> instead.
+          </small>
         </div>
         <div class="modal-footer">
           <button type="submit" class="btn btn-danger">Delete</button>
@@ -97,6 +141,7 @@
     </form>
   </div>
 </div>
+{% endif %}
 {% endfor %}
 
 <script>

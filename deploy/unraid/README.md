@@ -82,9 +82,60 @@ the package page at https://github.com/LappyNZ/Music_Invoicing_App/pkgs/containe
 
 3. To go back to the newest version, change the tag back to `latest` and run `update.sh`.
 
-Older versions run fine on a database that a newer version has upgraded; the upgrades only add things.
-One catch: versions before September 2026 don't know about **void** invoices and show them as Draft,
-so don't bulk-send while rolled back to one of those.
+Older versions run fine on a database that a newer version has upgraded. A few things behave the old way
+while rolled back:
+
+- Versions before September 2026 don't know about **void** invoices and show them as Draft, so don't
+  bulk-send while rolled back to one of those.
+- Invoices with the short kind of number, like `INV26-0128`, have their PDF saved under that name. Older
+  versions look for the old kind of name, so they say "PDF file is missing" and can't email those invoices.
+  Nothing is lost: it works again after updating.
+- Older versions don't know about **archived** students. They're offered for new lessons and invoices
+  again, and Delete is the old one that hides a student's invoices. Don't delete students while rolled back.
+
+## Connecting Gmail again
+
+The app sends email through Gmail, using a sign-in kept in `secrets/token.json`. If Google cancels it
+(after a password change, for example, or every 7 days while the Google Cloud project is in *Testing*),
+sending stops at the first invoice with "Gmail isn't connected", and nothing more is sent. To connect again:
+
+1. In the Unraid terminal, run:
+
+   ```sh
+   docker exec -it music-invoice python -m gmail_auth
+   ```
+
+2. It prints a long Google link. Open it in a browser on any computer or phone, and sign in with the
+   address the invoices are sent from. Keep the terminal open.
+3. Allow access. If Google says it hasn't verified the app, choose *Advanced* and continue: it's your own app.
+   The browser then shows an error such as "This site can't be reached" for a `localhost` address.
+   That's expected.
+4. Copy the whole address from the browser's address bar, paste it into the terminal and press Enter.
+   It should say "Gmail is connected".
+
+Then send the invoices that didn't go (set the list's Status filter to Draft to find them).
+
+## One-off: bringing back deleted students
+
+Deleting a student used to hide their invoices. The invoice list now shows those invoices as
+"Deleted student #7". The October 2025 copies of the database that `tidy-server.sh` moved into
+`old-YYYYMMDD/data/` still have those students, and a tool in the app can bring them back as archived
+students, so their invoices show their names again. It only brings back a student when that copy also
+has one of their invoices, so it can't attach the wrong name. Their lessons aren't brought back
+(the invoices keep their totals).
+
+```sh
+bash /mnt/user/appdata/music-invoice/scripts/backup.sh      # a backup first
+cd /mnt/user/appdata/music-invoice
+ls old-*/data/                                               # the copy is music_school.db.BAK.2025-10-02-1836
+cp old-*/data/music_school.db.BAK.2025-10-02-1836 data/restore-source.db
+docker exec music-invoice python -m tools.restore_deleted_students /data/restore-source.db           # shows what it would do
+docker exec music-invoice python -m tools.restore_deleted_students /data/restore-source.db --apply   # does it
+rm data/restore-source.db
+```
+
+The first run lists each student it found and changes nothing. After `--apply` they're on the Students
+page under *Show: Archived*.
 
 ## Where the backups are, and what's in them
 
@@ -126,3 +177,4 @@ folder once you're happy.
 - **`update.sh` says the container wasn't started this way:** it was started from another compose file or the
   Unraid Docker tab. The script stops rather than guess; update it the way it was started.
 - **A backup failed:** the notification says why, and so does the script's log in User Scripts.
+- **Sending stops with "Gmail isn't connected":** see [Connecting Gmail again](#connecting-gmail-again).

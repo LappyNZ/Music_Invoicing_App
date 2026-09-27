@@ -1,7 +1,7 @@
 from flask import Flask, render_template
 from config import get_config
 from db import init_db
-from utils import fmt_date, parse_date_any, nz_school_term
+from utils import fmt_date, invoice_number_of, parse_date_any, nz_school_term, utc_to_local
 from routes.students import students_bp
 from routes.lessons import lessons_bp
 from routes.invoices import invoices_bp
@@ -32,6 +32,8 @@ app.jinja_env.globals["fmt_date_display"] = fmt_date
 app.jinja_env.globals["fmt_date"] = fmt_date
 app.jinja_env.globals["parse_date_any"] = parse_date_any
 app.jinja_env.globals["nz_school_term"] = nz_school_term
+app.jinja_env.globals["invoice_number_of"] = invoice_number_of
+app.jinja_env.filters["local_time"] = utc_to_local
 
 
 @app.context_processor

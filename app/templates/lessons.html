@@ -5,7 +5,7 @@
     <div class="col-md-3">
         <select name="student_id" class="form-control" required>
             <option value="">Select student...</option>
-            {% for student in students %}
+            {% for student in students if student.active %}
             <option value="{{ student.id }}">{{ student.name }}</option>
             {% endfor %}
         </select>
@@ -34,7 +34,7 @@
       <option value="">All Students</option>
       {% for s in students %}
         <option value="{{ s.id }}" {% if selected_student == s.id|string %}selected{% endif %}>
-          {{ s.name }}
+          {{ s.name }}{{ ' (archived)' if not s.active }}
         </option>
       {% endfor %}
     </select>
@@ -59,63 +59,86 @@
     <button type="submit" class="btn btn-primary me-2 flex-fill">Filter</button>
     <a href="{{ url_for('lessons_bp.lessons') }}" class="btn btn-secondary flex-fill">Clear</a>
   </div>
+  <div class="col-12 small text-muted">
+    {% if start_date or end_date %}
+      Showing lessons {{ 'from ' ~ fmt_date(start_date) if start_date }} {{ 'to ' ~ fmt_date(end_date) if end_date }}.
+      <a href="{{ url_for('lessons_bp.lessons', student_id=selected_student or None, start_date='', end_date='') }}">Show all dates</a>
+    {% else %}
+      Showing lessons on all dates.
+    {% endif %}
+  </div>
 </form>
+
+{% if unreadable_count %}
+<div class="alert alert-warning">
+  {{ unreadable_count }} lesson{{ 's' if unreadable_count != 1 }} below {{ 'have times' if unreadable_count != 1 else 'has a time' }}
+  the app can't read, so {{ 'they' if unreadable_count != 1 else 'it' }} won't appear on invoices.
+  Use <strong>Edit</strong> to set the right time, or <strong>Delete</strong>.
+</div>
+{% endif %}
 
 <table class="table table-striped">
   <tr><th>Student</th><th>Date & Time</th><th>Duration</th><th>Rate</th><th>Actions</th></tr>
   {% for lesson in lessons %}
   <tr>
     <td>{{ lesson.student_name }}</td>
-    <td>{{ lesson.formatted_time }}</td>
-    <td>{{ lesson.duration }} min</td>
-    <td>${{ lesson.rate }}</td>
     <td>
-      <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editLessonModal{{ lesson.id }}">Edit</button>
-      <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteLessonModal{{ lesson.id }}">Delete</button>
+      {{ lesson.formatted_time }}
+      {% if lesson.unreadable %}<span class="badge bg-danger ms-1">Time not understood</span>{% endif %}
+    </td>
+    <td>{{ lesson.duration }} min</td>
+    <td>${{ "%.2f"|format(lesson.rate) }}</td>
+    <td>
+      <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editLessonModal"
+              data-lesson-id="{{ lesson.id }}" data-student-id="{{ lesson.student_id }}"
+              data-time="{{ lesson.input_time }}" data-raw-time="{{ lesson.lesson_time if lesson.unreadable }}"
+              data-duration="{{ lesson.duration }}" data-rate="{{ lesson.rate }}">Edit</button>
+      <button class="btn btn-sm btn-danger" data-bs-toggle="modal" data-bs-target="#deleteLessonModal"
+              data-lesson-id="{{ lesson.id }}" data-student-name="{{ lesson.student_name }}"
+              data-when="{{ lesson.formatted_time }}">Delete</button>
     </td>
   </tr>
+  {% else %}
+  <tr><td colspan="5" class="text-center text-muted">No lessons match these filters.</td></tr>
   {% endfor %}
 </table>
 
 {% endblock %}
 
 {% block modals %}
+{% macro return_fields() %}
+  <input type="hidden" name="return_student_id" value="{{ selected_student or '' }}">
+  <input type="hidden" name="return_start_date" value="{{ start_date or '' }}">
+  <input type="hidden" name="return_end_date" value="{{ end_date or '' }}">
+{% endmacro %}
 
-{% for lesson in lessons %}
-<!-- Edit Modal -->
-<div class="modal fade" id="editLessonModal{{ lesson.id }}" tabindex="-1">
+<!-- One Edit and one Delete dialog, filled in from the button that opens them -->
+<div class="modal fade" id="editLessonModal" tabindex="-1" aria-labelledby="editLessonLabel" aria-hidden="true">
   <div class="modal-dialog">
-     <form method="POST"
-       action="{{ url_for('lessons_bp.edit_lesson', lesson_id=lesson.id) }}"
-       data-debug="edit-lesson-{{ lesson.id }}">
-        <!-- persist filters -->
-        <input type="hidden" name="return_student_id"  value="{{ selected_student or '' }}">
-        <input type="hidden" name="return_start_date"  value="{{ start_date or '' }}">
-        <input type="hidden" name="return_end_date"    value="{{ end_date or '' }}">
+    <form method="POST" id="editLessonForm">
+      {{ return_fields() }}
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title">Edit Lesson</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          <h5 class="modal-title" id="editLessonLabel">Edit Lesson</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          <label class="form-label">Student</label>
-          <select name="student_id" class="form-select mb-2" required>
-              {% for student in students %}
-                <option value="{{ student.id }}"
-                    {{ 'selected' if (student.id|string) == (lesson.student_id|string) else '' }}>
-                    {{ student.name }}
-                </option>
-             {% endfor %}
+          <label class="form-label" for="editStudent">Student</label>
+          <select name="student_id" id="editStudent" class="form-select mb-2" required>
+            {% for student in students %}
+              <option value="{{ student.id }}">{{ student.name }}{{ ' (archived)' if not student.active }}</option>
+            {% endfor %}
           </select>
 
-          <label class="form-label">Lesson Time</label>
-          <input type="text" name="lesson_time" value="{{ lesson.lesson_time }}" class="form-control mb-2" required>
+          <label class="form-label" for="editTime">Lesson Time</label>
+          <input type="datetime-local" name="lesson_time" id="editTime" class="form-control mb-2" required>
+          <div class="form-text mb-2" id="editRawTime" hidden></div>
 
-          <label class="form-label">Duration (minutes)</label>
-          <input type="number" name="duration" value="{{ lesson.duration }}" class="form-control mb-2" required>
+          <label class="form-label" for="editDuration">Duration (minutes)</label>
+          <input type="number" name="duration" id="editDuration" min="1" class="form-control mb-2" required>
 
-          <label class="form-label">Rate ($)</label>
-          <input type="number" step="0.01" name="rate" value="{{ lesson.rate }}" class="form-control mb-2" required>
+          <label class="form-label" for="editRate">Rate ($)</label>
+          <input type="number" step="0.01" min="0" name="rate" id="editRate" class="form-control mb-2" required>
         </div>
         <div class="modal-footer">
           <button type="submit" class="btn btn-success">Save Changes</button>
@@ -126,21 +149,17 @@
   </div>
 </div>
 
-<!-- Delete Modal -->
-<div class="modal fade" id="deleteLessonModal{{ lesson.id }}" tabindex="-1">
+<div class="modal fade" id="deleteLessonModal" tabindex="-1" aria-labelledby="deleteLessonLabel" aria-hidden="true">
   <div class="modal-dialog">
-    <form method="POST" action="{{ url_for('lessons_bp.delete_lesson', lesson_id=lesson.id) }}">
-      <!-- persist filters -->
-      <input type="hidden" name="return_student_id"  value="{{ selected_student or '' }}">
-      <input type="hidden" name="return_start_date"  value="{{ start_date or '' }}">
-      <input type="hidden" name="return_end_date"    value="{{ end_date or '' }}">
+    <form method="POST" id="deleteLessonForm">
+      {{ return_fields() }}
       <div class="modal-content">
         <div class="modal-header">
-          <h5 class="modal-title">Delete Lesson</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          <h5 class="modal-title" id="deleteLessonLabel">Delete Lesson</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
         </div>
         <div class="modal-body">
-          Are you sure you want to delete this lesson for <strong>{{ lesson.student_name }}</strong> on <strong>{{ lesson.lesson_time }}</strong>?
+          Are you sure you want to delete this lesson for <strong id="deleteStudent"></strong> on <strong id="deleteWhen"></strong>?
         </div>
         <div class="modal-footer">
           <button type="submit" class="btn btn-danger">Delete</button>
@@ -150,14 +169,28 @@
     </form>
   </div>
 </div>
-{% endfor %}
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-  document.querySelectorAll('form[data-debug]').forEach(function(f) {
-    f.addEventListener('submit', function() {
-      console.log('Submitting', f.dataset.debug, '→', f.action);
-    });
+document.addEventListener('DOMContentLoaded', function () {
+  document.getElementById('editLessonModal').addEventListener('show.bs.modal', function (event) {
+    const btn = event.relatedTarget;
+    document.getElementById('editLessonForm').action =
+      "{{ url_for('lessons_bp.edit_lesson', lesson_id=0) }}".replace(/0$/, btn.dataset.lessonId);
+    document.getElementById('editStudent').value = btn.dataset.studentId;
+    document.getElementById('editTime').value = btn.dataset.time;
+    document.getElementById('editDuration').value = btn.dataset.duration;
+    document.getElementById('editRate').value = btn.dataset.rate;
+    const raw = document.getElementById('editRawTime');
+    raw.textContent = btn.dataset.rawTime ? 'It was saved as "' + btn.dataset.rawTime + '". Please pick the right time.' : '';
+    raw.hidden = !btn.dataset.rawTime;
+  });
+
+  document.getElementById('deleteLessonModal').addEventListener('show.bs.modal', function (event) {
+    const btn = event.relatedTarget;
+    document.getElementById('deleteLessonForm').action =
+      "{{ url_for('lessons_bp.delete_lesson', lesson_id=0) }}".replace(/0$/, btn.dataset.lessonId);
+    document.getElementById('deleteStudent').textContent = btn.dataset.studentName;
+    document.getElementById('deleteWhen').textContent = btn.dataset.when;
   });
 });
 </script>

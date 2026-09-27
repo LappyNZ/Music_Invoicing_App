@@ -20,8 +20,10 @@ Contents: [1 Summary](#1-summary) · [Status](#status-27-september-2026) · [2 W
 
 ## Status (27 September 2026)
 
-The quick fixes before Term 3 invoicing are done. They go live on the server with `update.sh` once merged
+**Phase 1 is done**, in two updates. Each goes live on the server with `update.sh` once merged
 ([deploy/unraid/README.md](../deploy/unraid/README.md)).
+
+**1. Quick fixes before Term 3 invoicing** (live since late September):
 
 - **Fixed:**
   - B1: *Mark sent* works on every row.
@@ -39,11 +41,38 @@ The quick fixes before Term 3 invoicing are done. They go live on the server wit
   - The version shows in the footer.
   - GitHub runs the tests before publishing an image.
   - New scripts for backups, updates, the server tidy-up and restoring ([deploy/unraid/](../deploy/unraid/)).
-- **Rehearsed** end to end in Docker on a copy of the live database: backup, tidy, upgrade, restore and rollback.
-- **Still open from Phase 1:**
-  - B4 (the lesson edit box itself), B7, B8, B10, B13, B14, B15, B16, B17, B20 and B22.
-  - The rest of B19.
-  - Undoing *Mark paid*.
+
+**2. The rest of Phase 1:**
+
+- **Fixed:**
+  - B4: the lesson edit box is a date-and-time picker, and times are checked and saved in one form. Times
+    saved the old way are repaired when the app starts; one that can't be read is flagged on the Lessons page.
+  - B7: the Lessons filter includes lessons on the end date.
+  - B8: students who stop are **archived**: they're no longer offered for new lessons or invoices, but keep
+    their lessons and invoices. *Delete* is only offered for a student without invoices (e.g. added by
+    mistake). Invoices of students deleted in the past show again, and a one-off tool brings those students
+    back from the October 2025 copy of the database.
+  - B10: each invoice stores its number and PDF filename, and times are stored in one form, in NZ time.
+  - B13: `scripts/reset_dev_db.py` builds made-up sample data through the app itself.
+  - B14: Gmail is connected from the Unraid terminal (`python -m gmail_auth`), never inside a web request.
+    If Google cancels the sign-in, sending stops at once with a message saying what to do.
+  - B15: invoices are sent one per request, with a progress window.
+  - B16: new invoices are numbered like `INV26-0042` (10 characters, so it fits a bank's Reference field).
+    The email and the PDF both ask for **Reference:** the invoice number and **Particulars:** the student's name.
+  - B17: the Lessons page opens on the last 4 and next 13 weeks (*Show all dates* for everything), with one
+    shared edit dialog and one delete dialog. On the live data it goes from over 10 MB to under 1 MB.
+  - B18: **Mark unpaid**. The $0 "payments" that retired an invoice replaced by a later one became voids;
+    other $0 payments (a waived fee, perhaps) were left as they are.
+  - B19: `<` and `&` show correctly in PDFs, and long extra items wrap. A half-filled or unreadable row stops
+    the invoice and is highlighted, a start date after the end date is questioned, and the "(blank)" school
+    filter works.
+  - B22: no change needed. The signature stays as the sender's name (your choice), and the payment reference
+    is fixed as in B16.
+- **Also done:** a slimmer Docker image (no compiler; every package installs from a ready-built wheel).
+- **Rehearsed** in Docker on a copy of the live database: the upgrade, bringing back deleted students, sending
+  with Gmail disconnected, and rolling back to the previous version.
+
+**Next:** Phase 2. B20 (security) was always part of it (2.7).
 
 ---
 
@@ -85,7 +114,7 @@ docker inspect music-invoice --format '{{ index .Config.Labels "org.opencontaine
 
 Term 3 ended on Friday 25 September, and Term 4 starts on Monday 12 October. Until the fixes land:
 
-> **Once the September 2026 update is deployed**, only two rows still apply: the lesson-time format and not deleting students. For a wrong invoice, use the new **Void** button instead of the $0 workaround.
+> **Now that the September 2026 quick fixes are live**, only two rows still apply: the lesson-time format and not deleting students. For a wrong invoice, use **Void** instead of the $0 workaround. **Once the rest of Phase 1 is deployed, none of these are needed.**
 
 | Do this | Because |
 |---|---|
@@ -203,26 +232,26 @@ Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a
 
 ### Phase 0: Know what's live and protect the data (S, before any code change)
 - 0.1 ✅ Find out what's live: it's this repo's code ([§2](#2-what-is-running-on-unraid-resolved)). Optionally confirm with the one-line `docker inspect`.
-- 0.2 Keep the server zip as a private backup. Set up a nightly automatic backup (✅ script ready: `deploy/unraid/backup.sh`) of `data/` and `secrets/` (e.g. the Unraid *User Scripts* plugin, keeping 30 days, copied off the server).
-- 0.3 Tidy the server folder (✅ script ready: `deploy/unraid/tidy-server.sh`): archive the unused old build files and `certs/`, but **keep `.env`** until the B11 fix is deployed ([§2](#2-what-is-running-on-unraid-resolved)).
+- 0.2 ✅ Keep the server zip as a private backup. Set up a nightly automatic backup (`deploy/unraid/backup.sh`) of `data/` and `secrets/` (e.g. the Unraid *User Scripts* plugin, keeping 30 days, copied off the server).
+- 0.3 ✅ Tidy the server folder (`deploy/unraid/tidy-server.sh`): archive the unused old build files and `certs/`, but **keep `.env`** until the B11 fix is deployed ([§2](#2-what-is-running-on-unraid-resolved)).
 - 0.4 Check the Gmail consent screen status.
 
-### Phase 1: Stabilise (M): fixes only, no new behaviour
-- 1.1 **Test harness:** ✅ pytest and Flask test client (29 tests); a sample-data seed and fixing `reset_dev_db.py` (B13) are still to do. Every fix below comes with a test.
+### Phase 1: Stabilise (M): fixes only, no new behaviour ✅
+- 1.1 ✅ **Test harness:** pytest and Flask test client (89 tests), and a sample-data seed in `reset_dev_db.py` (B13). Every fix below comes with a test.
 - 1.2 **Deployment:**
   - ✅ Run migrations at start-up (B12).
   - ✅ Show the version (git commit) in the footer and at `/version`.
   - ✅ Put the server's image-based compose file into the repo, with safe defaults for `TZ`/`PORT` (B11, B21). Deploying an update then means `docker compose pull && docker compose up -d` on Unraid; pin a commit tag to roll back.
-  - ✅ Save `requirements.txt` as UTF-8 and have CI run the tests before publishing. (Slimming the image is still to do.)
+  - ✅ Save `requirements.txt` as UTF-8 and have CI run the tests before publishing. Slim the image.
 - 1.3 ✅ **Buttons:** B1, B2.
-- 1.4 **Lessons:** ✅ B3; B4 (the invoice preview no longer crashes; the edit box and existing times still to do); B7; open the Lessons page on the current term by default (B17).
+- 1.4 ✅ **Lessons:** B3, B4, B7; open the Lessons page on recent and coming lessons by default (B17). (It uses a window of weeks rather than the current term, because the app only learns term dates in Phase 2.)
 - 1.5 ✅ **Create invoice:** B5, B6; stop double-submits; show "no lessons found" when there are none.
-- 1.6 **Safe sending:** ✅ confirmation, skip paid invoices, explicit re-send (B9); one email per request with progress (B15); Gmail authorisation outside web requests (B14).
-- 1.7 **Keep history:** archive students instead of deleting them, and keep their invoices visible (B8).
-- 1.8 **Stable invoice numbers:** store the invoice number and PDF filename, with consistent timestamps (B10). Optionally switch to a short number like `INV26-0042` and one payment reference everywhere (B16); this needs your OK (Q6).
-- 1.9 **Void and undo** (✅ Void and Restore; part of B18; high value, because the $0 "Mark paid" workaround is already in use): void an invoice, optionally pointing to its replacement; undo *Mark paid*. Existing $0 "payments" become voids.
-- 1.10 **Email wording:** signature from settings, one consistent payment reference (B16, B22).
-- 1.11 **Data clean-up migration:** repair the unreadable lesson time, normalise `paid_at` formats, and show invoices of deleted students again as archived (B4, B8, B10).
+- 1.6 ✅ **Safe sending:** confirmation, skip paid invoices, explicit re-send (B9); one email per request with progress (B15); Gmail authorisation outside web requests (B14).
+- 1.7 ✅ **Keep history:** archive students instead of deleting them, and keep their invoices visible (B8).
+- 1.8 ✅ **Stable invoice numbers:** store the invoice number and PDF filename, with consistent timestamps (B10). New invoices use the short `INV26-0042` and one payment reference everywhere (B16, Q6).
+- 1.9 ✅ **Void and undo** (part of B18): Void and Restore, and undo *Mark paid*. Existing $0 "payments" on replaced invoices became voids.
+- 1.10 ✅ **Email wording:** one consistent payment reference (B16). The signature stays as the sender's name, as you chose (B22).
+- 1.11 ✅ **Data clean-up migration:** repair unreadable lesson times, normalise `paid_at` formats, and show invoices of deleted students again, with a tool to bring those students back as archived (B4, B8, B10).
 
 ### Phase 2: Term-based workflow (L): the big UX improvement
 - 2.1 **Data model:** terms (seeded 2026–27), each student's regular slot, rate, active flag and billing contact(s), lesson status, `invoice_lines`, and money in cents ([Appendix A](#appendix-a-proposed-data-model)).
@@ -264,7 +293,7 @@ Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a
 3. **Billing rules:** the data shows you invoice at the end of each term (in arrears), which the register design fits. Still open: which absences are charged (e.g. short notice)? How are makeup lessons handled? Are lessons that fall in the school holidays real (e.g. makeups to bill) or leftovers from *Weeks Repeating*?
 4. **Rates:** some students' rates changed partway through the data. Do rates change at a set time (e.g. the start of the year)?
 5. **Rentals:** are they charged per term or per month? Is there a deposit? Do rentals continue through the holidays?
-6. **Invoice numbers:** OK to switch to a short format like `INV26-0042` for new invoices (old ones unchanged)?
+6. ~~**Invoice numbers**~~: answered. New invoices use `INV26-0042`; existing ones keep theirs. Payers are asked for **Reference:** the invoice number and **Particulars:** the student's name, in both the email and the PDF. The email signature stays as the sender's name only.
 7. **Email:** does Gmail sending work reliably at the moment, or do you often have to re-authorise?
 8. **Card payments:** interested enough to open a Stripe account? Would you absorb the fees or pass them on?
 9. **Devices:** will the app be used only at the desk, or also on a phone or iPad?
@@ -300,4 +329,5 @@ payment_allocations payment_id, invoice_id, amount_cents
 - I drove the UI in Chromium (via Playwright), clicking the actual buttons and menus, and measured page sizes with two years of made-up data.
 - I checked the compose files' variable substitution with `docker compose config`.
 - I compared a copy of the Unraid server folder with this repo: the code and configuration files, and the layout and metadata of the generated PDFs. The secrets in it were not opened. I checked the live database with aggregate queries only (counts and formats); nothing from the server copy was added to this repository.
+- Each update was rehearsed in Docker on a copy of the live database (checked with aggregate queries only), including rolling back. The copies were deleted afterwards.
 - **Not tested:** real Gmail sending, and the running container itself (it isn't reachable from here).
