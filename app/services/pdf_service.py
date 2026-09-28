@@ -18,7 +18,7 @@ def build_invoice_pdf(target, *, logo_path, business, number, issued, bill_to, b
     """An invoice laid out from its lines. `target` is a file path or a file-like object.
 
     `business` holds name, address lines, phone, mobile, email and bank account; `lines` are the invoice's lines
-    (text, kind and cents), exactly as they'll be charged.
+    (text, kind and cents), exactly as they'll be charged. Cancelled lessons are left off.
     """
     doc = SimpleDocTemplate(target, pagesize=A4, leftMargin=42, rightMargin=42, topMargin=40, bottomMargin=40,
                             title=f"Invoice {number}", author=business.get("name") or "")
@@ -58,13 +58,10 @@ def build_invoice_pdf(target, *, logo_path, business, number, issued, bill_to, b
     elements += [who, Spacer(1, 14)]
 
     rows = [[para("DESCRIPTION", label), Paragraph("AMOUNT", ParagraphStyle("LabelR", parent=label, alignment=TA_RIGHT))]]
-    greyed = []
-    for i, line in enumerate(lines, start=1):
-        if line["kind"] == "cancelled":
-            rows.append([para(line["text"], small), Paragraph("no charge", ParagraphStyle("NC", parent=small, alignment=TA_RIGHT))])
-            greyed.append(i)
-        else:
-            rows.append([para(line["text"]), para(money(line["cents"]), right)])
+    for line in lines:
+        if line["kind"] == "cancelled":     # no charge, so not on the invoice (the register still has it)
+            continue
+        rows.append([para(line["text"]), para(money(line["cents"]), right)])
     rows.append([Paragraph("<b>Total</b>", normal), Paragraph(f"<b>{money(total_cents)}</b>", right)])
     table = Table(rows, colWidths=[421, 90], repeatRows=1)
     table.setStyle(TableStyle([

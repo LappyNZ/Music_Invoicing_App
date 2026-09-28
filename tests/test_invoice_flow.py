@@ -152,6 +152,14 @@ def test_the_invoice_shows_its_lines_from_the_register(client, db, term3, studen
     assert "$120.00" in html                                                   # 45 + 45 + 30 at $60 an hour
 
 
+def test_cancelled_lessons_are_listed_but_left_off_the_invoice_itself(client, db, alices_draft):
+    html = page(client, f"/invoices/{alices_draft}")
+
+    listed, invoice_itself = html.split('class="paper"', 1)
+    assert "Cancelled, Mon 27 Jul" in listed and "#lesson-" in listed
+    assert "Mon 27 Jul" not in invoice_itself and "Lesson, Mon 20 Jul" in invoice_itself
+
+
 def test_items_and_discounts_can_be_added_and_removed(client, db, alices_draft):
     client.post(f"/invoices/{alices_draft}/items", data={"description": "ABRSM Grade 5 exam entry", "amount": "120"})
     client.post(f"/invoices/{alices_draft}/items", data={"description": "Sibling discount", "amount": "−20"})
@@ -219,9 +227,10 @@ def test_the_pdf_has_the_logo_lines_and_how_to_pay(client, db, app, alices_draft
 
     assert response.mimetype == "application/pdf"
     text = pdf_text(BytesIO(response.data))
-    for line in ["Lesson, Mon 20 Jul, 3:30 pm (30 min)", "Cancelled, Mon 27 Jul", "no charge", "Total", "$70.00",
+    for line in ["Lesson, Mon 20 Jul, 3:30 pm (30 min)", "Lesson, Mon 3 Aug, 3:30 pm (30 min)", "Total", "$70.00",
                  "Prompt payment is appreciated.", f"Reference: {number}", "Particulars: Alice Aroha", "BILL TO", "Pat Aroha"]:
         assert line in text
+    assert "Mon 27 Jul" not in text and "no charge" not in text               # the cancelled lesson isn't on it
     assert len(PdfReader(BytesIO(response.data)).pages[0].images) == 1         # the logo
     assert os.listdir(app.config["INVOICE_PDF_DIR"]) == []                     # a draft's PDF isn't kept
 
@@ -374,6 +383,17 @@ def test_a_change_in_the_register_after_sending_is_pointed_out(client, db, term3
     assert "The register changed after this invoice was sent." in html
     assert "Mon 20 Jul is now cancelled, no charge (was a lesson)" in html
     assert invoice(db, sent)["total_cents"] == 7000                           # the invoice as sent
+
+
+def test_moving_a_lesson_on_a_sent_invoice_needs_no_resending(client, db, term3, sent):
+    first = db.execute("SELECT id FROM lessons ORDER BY lesson_time").fetchone()[0]
+
+    client.post(f"/register/lesson/{first}/edit", data={"date": "2026-07-21", "time": "16:00", "minutes": "30", "rate": "70",
+                                                         "kind_field": "1", "extra": "1", "term": term3["id"], "week": 1})
+
+    html = page(client, f"/invoices/{sent}")
+    assert "The register changed after this invoice was sent." not in html      # the charge is the same
+    assert invoice(db, sent)["total_cents"] == 7000
 
 
 def test_correct_and_resend(client, db, app, sent, gmail):

@@ -171,8 +171,11 @@ def edit_lesson(lesson_id):
         flash(f"{problem} Nothing was changed.", "warning")
         return form_back(f"lesson-{lesson_id}")
     when, minutes, rate, note = values
-    conn.execute("UPDATE lessons SET lesson_time=?, duration=?, rate=?, note=? WHERE id=?",
-                 (when.strftime(DATETIME_FORMAT), minutes, rate, note, lesson_id))
+    kind = None    # unchanged, unless the form has the "Extra lesson" box
+    if request.form.get("kind_field"):
+        kind = "extra" if request.form.get("extra") == "1" else "regular"
+    conn.execute("UPDATE lessons SET lesson_time=?, duration=?, rate=?, note=?, kind=COALESCE(?, kind) WHERE id=?",
+                 (when.strftime(DATETIME_FORMAT), minutes, rate, note, kind, lesson_id))
     if lesson["invoice_id"]:
         B.refresh_total(conn, lesson["invoice_id"])
     conn.commit()

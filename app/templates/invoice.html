@@ -117,7 +117,8 @@
         <div class="col-sm-3"><label class="form-label" for="it-amount">Amount</label><input id="it-amount" type="text" name="amount" inputmode="decimal" class="form-control" placeholder="120.00" required></div>
         <div class="col-sm-2"><button class="btn btn-teal w-100" type="submit">Add</button></div>
       </form>
-      <p class="hint mt-2 mb-0">For a discount, use a minus amount (e.g. −20). Lessons come from the register: use <b>Register</b> next to one to change it, and this invoice updates by itself.</p>
+      <p class="hint mt-2 mb-0">For a discount, use a minus amount (e.g. −20). Lessons come from the register: use <b>Register</b> next to one to change it, and this invoice updates by itself.
+        Cancelled lessons are listed here but left off the invoice itself.</p>
       {% endif %}
     </section>
     {% endif %}
@@ -166,7 +167,7 @@
         <thead><tr><th>Description</th><th>Amount</th></tr></thead>
         <tbody>
           {% if legacy %}<tr><td>Cello lessons, {{ period }}</td><td>{{ total|money }}</td></tr>
-          {% else %}{% for l in lines %}<tr class="{{ 'nc' if l.kind == 'cancelled' }}"><td>{{ l.text }}</td><td>{{ 'no charge' if l.kind == 'cancelled' else l.cents|money }}</td></tr>{% endfor %}{% endif %}
+          {% else %}{% for l in lines if l.kind != 'cancelled' %}<tr><td>{{ l.text }}</td><td>{{ l.cents|money }}</td></tr>{% endfor %}{% endif %}
         </tbody>
         <tfoot><tr><td>Total</td><td>{{ total|money }}</td></tr></tfoot>
       </table>

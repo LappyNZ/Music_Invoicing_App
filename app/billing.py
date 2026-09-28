@@ -298,7 +298,7 @@ def record_sent(conn, inv, sent_to, pdf_filename, subject, body):
 
 
 def changes_since_sent(conn, inv):
-    """What the register says now that differs from the invoice as sent."""
+    """What the register says now that would change the amount of the invoice as sent."""
     if is_legacy(inv) or inv["status"] not in ("sent", "paid"):
         return []
     version = latest_version(conn, inv)
@@ -310,11 +310,12 @@ def changes_since_sent(conn, inv):
     for line in live_lines(conn, inv):
         old = was.pop(line["key"], None)
         if old is None:
-            out.append(f"Added: {line['text']}")
-        elif (old["kind"], old["cents"]) != (line["kind"], line["cents"]):
+            if line["cents"]:
+                out.append(f"Added: {line['text']}")
+        elif old["cents"] != line["cents"]:    # a new day, time or label for the same charge isn't worth resending
             when = fmt_day(date.fromisoformat(line["date"])) if line.get("date") else line["text"]
             out.append(f"{when} is now {words.get(line['kind'], line['kind'])} (was {words.get(old['kind'], old['kind'])})")
-    out += [f"Removed: {old['text']}" for old in was.values()]
+    out += [f"Removed: {old['text']}" for old in was.values() if old["cents"]]
     if inv["one_off"]:
         return out
     # lessons added to the register for these students since, and not billed anywhere yet
