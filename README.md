@@ -1,12 +1,13 @@
-## 🎻 Music Invoice App
+# 🎻 Music Invoice App
 
-A Flask-based invoicing web application for managing private music students, lessons, and billing.
+Term-by-term invoicing for a private music teacher in New Zealand. Mark each week's lessons in a register,
+make every family's invoice from it in one go, email them, and keep track of who has paid.
 
-Designed for simplicity, safety, and maintainability, with a clean UI and a Docker-based deployment workflow.
+A small Flask and SQLite app that runs in Docker on a home server (Unraid) and sends email through Gmail.
 
 ## ✨ Features
 
-The app is organised around the school term:
+A term goes like this:
 
 * **Home** says what to do next: check the register, make the invoices, send them, get the next term ready
 * **Register:** each term's lessons week by week (or the whole term as a grid). Every lesson starts as
