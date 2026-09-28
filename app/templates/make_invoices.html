@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow on-glass mb-1">{{ term.name }} · {{ fmt_dm(term.start_date|todate) }} to {{ fmt_dm(term.end_date|todate) }}</p>
+    <h2 class="page-title">Make invoices</h2>
+    <p class="page-sub">The drafts are made from the register. Nothing is emailed until you send them.</p>
+  </div>
+  <div class="tools">
+    <a class="btn btn-sm btn-light-glass" href="{{ url_for('invoices_bp.invoice_list', term=term.id) }}">← {{ term.name }} invoices</a>
+  </div>
+</div>
+
+{% if unchecked %}
+<div class="panel warn mb-3">
+  <b>{{ 'Week ' ~ unchecked[0] ~ ' hasn’t' if unchecked|length == 1 else 'Weeks ' ~ (unchecked[:-1]|join(', ')) ~ ' and ' ~ unchecked[-1] ~ ' haven’t' }} been checked in the register.</b>
+  You can still make the invoices, and they’ll update if you change the register before sending.
+  <a class="btn btn-sm btn-teal ms-1" href="{{ url_for('register_bp.register', term=term.id, week=unchecked[0]) }}">Open week {{ unchecked[0] }}</a>
+</div>
+{% endif %}
+{% if running %}
+<div class="panel mb-3">{{ term.name }} isn’t over yet, so the invoices will include the lessons still to come, as they are in the register now.</div>
+{% endif %}
+
+{% if elsewhere %}
+<section class="panel warn mb-3" aria-labelledby="elsewhere-h">
+  <h3 id="elsewhere-h" class="h5">Some {{ term.name }} lessons are already on an older invoice</h3>
+  <p class="mb-2">An invoice made before the register covers these dates, so these lessons are left off the {{ term.name }} invoices.
+    That’s right if the family was charged for them on it. If it was only meant for an earlier term, bill them here instead.</p>
+  <ul class="mini-list">
+    {% for e in elsewhere %}
+    <li>
+      <span class="who"><b>{{ e.name }}</b><small>{{ e.lessons }} lesson{{ 's' if e.lessons != 1 }} on {{ e.invoice_number }} ({{ e.period }})</small></span>
+      <a class="btn btn-sm btn-link-dark" href="{{ url_for('invoices_bp.invoice', invoice_id=e.invoice_id) }}">Open {{ e.invoice_number }}</a>
+      <form method="post" action="{{ url_for('invoices_bp.release_lessons') }}">
+        <input type="hidden" name="term" value="{{ term.id }}"><input type="hidden" name="invoice" value="{{ e.invoice_id }}">
+        <button class="btn btn-sm btn-light-glass border" type="submit">Bill them on {{ term.name }} invoices</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+{% if unbilled %}
+<form method="post" action="{{ url_for('invoices_bp.make_invoices') }}" class="panel">
+  <input type="hidden" name="term" value="{{ term.id }}">
+  <h3 class="h5">{{ unbilled|length }} student{{ 's have' if unbilled|length != 1 else ' has' }} lessons to invoice</h3>
+  <p class="mb-3">{{ unbilled|map(attribute='name')|join(', ') }}</p>
+
+  {% if families %}
+  <div class="form-check mb-3">
+    <input class="form-check-input" type="checkbox" name="family" value="1" id="mk-family">
+    <label class="form-check-label" for="mk-family"><b>One invoice per family</b> for students who share an email address
+      ({{ families|join('; ') }})</label>
+  </div>
+  {% endif %}
+
+  {% if owing %}
+  <div class="form-check mb-1">
+    <input class="form-check-input" type="checkbox" name="carry" value="1" id="mk-carry">
+    <label class="form-check-label" for="mk-carry"><b>Add what’s still owing from earlier invoices</b> ({{ owing_total|money }} in all)</label>
+  </div>
+  <ul class="mb-1 small">
+    {% for o in owing %}<li>{{ o.number }}, {{ o.name }}: {{ o.owing|money }}{{ ' (you chose to move it to the next invoice, so it’s added either way)' if o.state == 'carried' }}</li>{% endfor %}
+  </ul>
+  <p class="hint mb-3">Leave this unticked if some of these have been paid but the payment isn’t recorded yet. You can add one later:
+    open the old invoice and choose <b>Move what’s owing to the next invoice</b>.</p>
+  {% endif %}
+
+  <button class="btn btn-teal btn-lg" type="submit">Make {{ unbilled|length }} draft{{ 's' if unbilled|length != 1 }}</button>
+  <p class="hint mt-2 mb-0">You can then open each one to add items (e.g. an exam fee), change the email wording, or email yourself a copy first.</p>
+</form>
+{% else %}
+<div class="panel">
+  <p class="mb-2">There’s nothing new to invoice for {{ term.name }}: every lesson with a charge is already on an invoice.</p>
+  <a class="btn btn-teal" href="{{ url_for('invoices_bp.invoice_list', term=term.id) }}">See the {{ term.name }} invoices</a>
+</div>
+{% endif %}
+{% endblock %}

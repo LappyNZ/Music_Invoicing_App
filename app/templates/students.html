@@ -4,16 +4,40 @@
   <input type="hidden" name="return_school" value="{{ selected_school or '' }}">
   <input type="hidden" name="return_q" value="{{ q or '' }}">
 {% endmacro %}
+{% macro lesson_fields(prefix, s=None) %}
+  <div class="col-6 col-md-3"><label class="form-label" for="{{ prefix }}-day">Lesson day</label>
+    <select id="{{ prefix }}-day" name="lesson_day" class="form-select">
+      <option value="">—</option>
+      {% for d in day_names %}<option value="{{ loop.index }}"{{ ' selected' if s and s.lesson_day == loop.index }}>{{ d }}</option>{% endfor %}
+    </select></div>
+  <div class="col-6 col-md-3"><label class="form-label" for="{{ prefix }}-start">Time</label>
+    <input id="{{ prefix }}-start" type="time" name="lesson_start" step="300" value="{{ s.lesson_start if s and s.lesson_start else '' }}" class="form-control"></div>
+  <div class="col-6 col-md-3"><label class="form-label" for="{{ prefix }}-minutes">Minutes</label>
+    <input id="{{ prefix }}-minutes" type="number" name="lesson_minutes" min="5" max="240" value="{{ s.lesson_minutes if s and s.lesson_minutes else '' }}" class="form-control"></div>
+  <div class="col-6 col-md-3"><label class="form-label" for="{{ prefix }}-rate">$ per hour</label>
+    <input id="{{ prefix }}-rate" type="number" name="lesson_rate" min="0" step="0.5" value="{{ '%g'|format(s.lesson_rate) if s and s.lesson_rate is not none else '' }}" class="form-control"></div>
+{% endmacro %}
 {% block content %}
-<h2>Student Management</h2>
-<form method="POST" class="mb-3">
-  <input type="text" name="name" placeholder="Student's Name" required>
-  <input type="email" name="email" placeholder="Email" required>
-  <input type="text" name="parent" placeholder="Parent's Name">
-  <input type="text" name="phone" placeholder="Phone">
-  <input type="text" name="school" placeholder="e.g., Burnside High">
-  <button type="submit" class="btn btn-primary">Add Student</button>
-</form>
+<div class="page-head">
+  <div>
+    <p class="eyebrow on-glass mb-1">People</p>
+    <h2 class="page-title">Students</h2>
+  </div>
+</div>
+
+<details class="panel mb-3">
+  <summary class="fw-bold" style="cursor:pointer">Add a student</summary>
+  <form method="POST" class="row g-2 mt-1">
+    <div class="col-md-4"><label class="form-label" for="add-name">Student’s name</label><input id="add-name" type="text" name="name" class="form-control" required></div>
+    <div class="col-md-4"><label class="form-label" for="add-email">Email (where invoices go)</label><input id="add-email" type="email" name="email" class="form-control" required></div>
+    <div class="col-md-4"><label class="form-label" for="add-parent">Parent’s name (who invoices are to)</label><input id="add-parent" type="text" name="parent" class="form-control"></div>
+    <div class="col-md-4"><label class="form-label" for="add-phone">Phone</label><input id="add-phone" type="text" name="phone" class="form-control"></div>
+    <div class="col-md-4"><label class="form-label" for="add-school">School</label><input id="add-school" type="text" name="school" class="form-control" placeholder="e.g. Burnside High"></div>
+    <div class="col-12"><p class="fw-bold mb-0 mt-2">Regular lesson <span class="muted fw-normal">(optional, used when a term is started)</span></p></div>
+    {{ lesson_fields('add') }}
+    <div class="col-12"><button type="submit" class="btn btn-teal">Add student</button></div>
+  </form>
+</details>
 
 <form method="get" class="filters" style="margin-bottom:1rem; display:flex; gap:.5rem; align-items:center;">
   <label>Show:
@@ -42,7 +66,7 @@
 </form>
 
 <table class="table table-striped">
-  <tr><th>Student's Name</th><th>Email</th><th>Parent's Name</th><th>Phone</th><th>School</th><th class="text-end">Invoices</th><th>Actions</th></tr>
+  <tr><th>Student's Name</th><th>Email</th><th>Parent's Name</th><th>Phone</th><th>School</th><th>Regular lesson</th><th class="text-end">Invoices</th><th>Actions</th></tr>
   {% for student in students %}
   <tr class="{{ 'text-muted' if not student.active }}">
     <td>
@@ -53,6 +77,7 @@
     <td>{{ student.parent }}</td>
     <td>{{ student.phone }}</td>
     <td>{{ student.school }}</td>
+    <td class="text-nowrap">{{ student.lesson_text or '—' }}</td>
     <td class="text-end">
       {% if student.invoice_count %}
         <a href="{{ url_for('invoices_bp.invoice_list', student_id=student.id) }}">{{ student.invoice_count }}</a>
@@ -78,7 +103,7 @@
     </td>
   </tr>
   {% else %}
-  <tr><td colspan="7" class="text-center text-muted">No students match these filters.</td></tr>
+  <tr><td colspan="8" class="text-center text-muted">No students match these filters.</td></tr>
   {% endfor %}
 </table>
 {% endblock %}
@@ -98,11 +123,24 @@
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
-          <input type="text" name="name" value="{{ student.name }}" class="form-control mb-2" required>
-          <input type="email" name="email" value="{{ student.email }}" class="form-control mb-2" required>
-          <input type="text" name="parent" value="{{ student.parent }}" class="form-control mb-2">
-          <input type="text" name="phone" value="{{ student.phone }}" class="form-control mb-2">
-          <input type="text" name="school" value="{{ student.school or '' }}" class="form-control mb-2">
+          <div class="row g-2">
+            <div class="col-12"><label class="form-label" for="e{{ student.id }}-name">Student’s name</label>
+              <input id="e{{ student.id }}-name" type="text" name="name" value="{{ student.name }}" class="form-control" required></div>
+            <div class="col-12"><label class="form-label" for="e{{ student.id }}-email">Email (where invoices go)</label>
+              <input id="e{{ student.id }}-email" type="email" name="email" value="{{ student.email }}" class="form-control" required></div>
+            <div class="col-12"><label class="form-label" for="e{{ student.id }}-parent">Parent’s name (who invoices are to)</label>
+              <input id="e{{ student.id }}-parent" type="text" name="parent" value="{{ student.parent or '' }}" class="form-control"></div>
+            <div class="col-6"><label class="form-label" for="e{{ student.id }}-phone">Phone</label>
+              <input id="e{{ student.id }}-phone" type="text" name="phone" value="{{ student.phone or '' }}" class="form-control"></div>
+            <div class="col-6"><label class="form-label" for="e{{ student.id }}-school">School</label>
+              <input id="e{{ student.id }}-school" type="text" name="school" value="{{ student.school or '' }}" class="form-control"></div>
+            <div class="col-12"><p class="fw-bold mb-0 mt-2">Regular lesson</p></div>
+            {{ lesson_fields('e' ~ student.id, student) }}
+            <div class="col-12"><div class="form-check">
+              <input class="form-check-input" type="checkbox" name="apply_rate" value="1" id="e{{ student.id }}-apply" checked>
+              <label class="form-check-label" for="e{{ student.id }}-apply">If the rate changes, use it for their lessons not invoiced yet</label>
+            </div></div>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="submit" class="btn btn-success">Save Changes</button>

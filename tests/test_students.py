@@ -17,12 +17,13 @@ def test_an_archived_student_is_not_offered_for_new_lessons_or_invoices(client, 
 
     client.post(f"/students/archive/{ben}", follow_redirects=True)
 
-    assert "Ben Brown" not in page(client, "/invoices")               # Create
+    assert "Ben Brown" not in page(client, "/invoices")               # the one-off invoice form
+    assert "Ben Brown" not in page(client, "/register")               # extra lessons, starting partway through
+    assert "Ben Brown" not in page(client, "/terms/start")            # weekly lessons for a new term
     add_lesson, lesson_filter = page(client, "/lessons").split('<form method="get"', 1)
     assert "Ben Brown" not in add_lesson
     assert "Ben Brown (archived)" in lesson_filter
-    assert "Ben Brown (archived)" in page(client, "/invoices/list")   # filter
-    assert "Ben Brown" in page(client, "/invoices/list")              # and his invoice is still listed
+    assert "Ben Brown" in page(client, "/invoices?show=all")          # and his invoice is still listed
     assert "Alice Aroha" in page(client, "/invoices")
 
 
@@ -51,6 +52,19 @@ def test_a_student_with_invoices_cannot_be_deleted(client, db, make_student, mak
     assert "can&#39;t be deleted" in response.get_data(as_text=True)
     assert db.execute("SELECT COUNT(*) FROM students").fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM lessons").fetchone()[0] == 1
+
+
+def test_a_student_on_a_family_invoice_cannot_be_deleted(client, db, today, term3, student, lesson):
+    today("2026-09-28")
+    alice, ben = student("Alice Aroha", "pat@example.com"), student("Ben Aroha", "pat@example.com")
+    lesson(alice)
+    lesson(ben, "2026-07-20 16:00")
+    client.post("/invoices/make", data={"term": term3["id"], "family": "1"})
+
+    assert f"/students/delete/{ben}" not in page(client, "/students")
+    client.post(f"/students/delete/{ben}")
+
+    assert db.execute("SELECT COUNT(*) FROM students").fetchone()[0] == 2
 
 
 def test_a_student_added_by_mistake_can_be_deleted_with_their_lessons(client, db, make_student, make_lesson):
@@ -93,10 +107,66 @@ def test_invoices_of_a_deleted_student_still_show(client, db, make_student, make
     db.execute("DELETE FROM students WHERE id=?", (ben,))
     db.commit()
 
-    listing = page(client, "/invoices/list")
+    listing = page(client, "/invoices?show=all")
 
     assert f"Deleted student #{ben}" in listing
     assert f"-{invoice:04d}" in listing
+    assert f"Deleted student #{ben}" in page(client, f"/invoices/{invoice}")
+
+
+# ---------------- Regular lessons ----------------
+
+def regular(db, student_id):
+    return tuple(db.execute("SELECT lesson_day, lesson_start, lesson_minutes, lesson_rate FROM students WHERE id=?",
+                            (student_id,)).fetchone())
+
+
+def test_a_student_can_be_added_with_their_regular_lesson(client, db):
+    client.post("/students", data={"name": "Alice Aroha", "email": "pat@example.com", "parent": "Pat Aroha", "phone": "",
+                                   "lesson_day": "2", "lesson_start": "16:00", "lesson_minutes": "45", "lesson_rate": "65"})
+
+    assert regular(db, 1) == (2, "16:00", 45, 65.0)
+    assert "Tue 4:00 pm, 45 min, $65/h" in page(client, "/students")
+
+
+def test_parts_of_a_regular_lesson_that_cannot_be_read_are_left_blank(client, db):
+    client.post("/students", data={"name": "Alice Aroha", "email": "pat@example.com", "phone": "",
+                                   "lesson_day": "9", "lesson_start": "4pm", "lesson_minutes": "30", "lesson_rate": "nan"})
+
+    assert regular(db, 1) == (None, None, 30, None)
+
+
+def edit(client, student_id, rate, apply_rate="1"):
+    return client.post(f"/students/edit/{student_id}", follow_redirects=True, data={
+        "name": "Alice Aroha", "email": "pat@example.com", "parent": "Pat Aroha", "phone": "", "school": "",
+        "lesson_day": "1", "lesson_start": "15:30", "lesson_minutes": "30", "lesson_rate": rate, "apply_rate": apply_rate,
+    }).get_data(as_text=True)
+
+
+def test_a_lower_rate_is_used_for_lessons_not_invoiced_yet(client, db, today, term3, student, lesson, gmail):
+    today("2026-09-28")
+    alice = student("Alice Aroha", lesson_rate=70)
+    billed = lesson(alice, "2026-07-20 15:30")
+    client.post("/invoices/make", data={"term": term3["id"]})
+    draft = db.execute("SELECT id FROM invoices").fetchone()[0]
+    client.post(f"/invoices/{draft}/send")                                   # this one has gone at $70
+    later = [lesson(alice, "2026-10-12 15:30"), lesson(alice, "2026-10-19 15:30"), lesson(alice, "2026-10-21 10:00", kind="extra")]
+
+    html = edit(client, alice, "60")
+
+    assert "2 lessons not invoiced yet now use $60 an hour" in html
+    rates = dict(db.execute("SELECT id, rate FROM lessons").fetchall())
+    assert (rates[billed], rates[later[0]], rates[later[1]], rates[later[2]]) == (70.0, 60.0, 60.0, 70.0)
+
+
+def test_the_rate_can_change_for_next_term_only(client, db, student, lesson):
+    alice = student("Alice Aroha", lesson_rate=70)
+    entered = lesson(alice, "2026-10-12 15:30")
+
+    edit(client, alice, "60", apply_rate="")
+
+    assert regular(db, alice)[3] == 60.0
+    assert db.execute("SELECT rate FROM lessons WHERE id=?", (entered,)).fetchone()[0] == 70.0
 
 
 # ---------------- Bringing back deleted students from an old copy ----------------
@@ -164,7 +234,7 @@ def test_restoring_brings_back_only_proven_students_as_archived(copies, client, 
     assert "may be a different person" in out               # Cara: #13 belongs to someone else in the old copy
     assert "not in any of the old copies" in out            # student #4
     assert students_in(live) == [(1, "Alice", None, None, 1, 0), (2, "Ben Brown", "Bea Brown", "Burnside High", 0, 1)]
-    listing = client.get("/invoices/list").get_data(as_text=True)
+    listing = client.get("/invoices?show=all").get_data(as_text=True)
     assert "Deleted student #2" not in listing and "Ben Brown" in listing
 
 

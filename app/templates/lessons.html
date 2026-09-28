@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Lesson Management</h2>
+<div class="page-head">
+  <div>
+    <p class="eyebrow on-glass mb-1">Every lesson</p>
+    <h2 class="page-title">All lessons</h2>
+    <p class="page-sub">To mark lessons as had, cancelled or missed, use the <a class="on-glass" href="{{ url_for('register_bp.register') }}">Register</a>.</p>
+  </div>
+</div>
 <form method="POST" class="row g-3 mb-4">
     <div class="col-md-3">
         <select name="student_id" class="form-control" required>
@@ -78,7 +84,7 @@
 {% endif %}
 
 <table class="table table-striped">
-  <tr><th>Student</th><th>Date & Time</th><th>Duration</th><th>Rate</th><th>Actions</th></tr>
+  <tr><th>Student</th><th>Date & Time</th><th>Duration</th><th>Rate</th><th>Register</th><th>Invoice</th><th>Actions</th></tr>
   {% for lesson in lessons %}
   <tr>
     <td>{{ lesson.student_name }}</td>
@@ -88,6 +94,8 @@
     </td>
     <td>{{ lesson.duration }} min</td>
     <td>${{ "%.2f"|format(lesson.rate) }}</td>
+    <td>{{ {'taught': 'Had lesson', 'cancelled': 'Cancelled', 'missed': 'Missed (charged)', 'holiday': 'Holiday'}.get(lesson.status, lesson.status) }}{{ ' · extra' if lesson.kind == 'extra' }}</td>
+    <td>{% if lesson.invoice_id and lesson.invoice_number %}<a href="{{ url_for('invoices_bp.invoice', invoice_id=lesson.invoice_id) }}">{{ lesson.invoice_number }}</a>{% else %}—{% endif %}</td>
     <td>
       <button class="btn btn-sm btn-warning" data-bs-toggle="modal" data-bs-target="#editLessonModal"
               data-lesson-id="{{ lesson.id }}" data-student-id="{{ lesson.student_id }}"
@@ -99,7 +107,7 @@
     </td>
   </tr>
   {% else %}
-  <tr><td colspan="5" class="text-center text-muted">No lessons match these filters.</td></tr>
+  <tr><td colspan="7" class="text-center text-muted">No lessons match these filters.</td></tr>
   {% endfor %}
 </table>
 

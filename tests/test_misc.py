@@ -40,7 +40,11 @@ def test_the_dev_database_script_builds_a_database_the_app_can_use(tmp_path):
     conn = sqlite3.connect(tmp_path / "music_school_dev.db")
     assert conn.execute("PRAGMA user_version").fetchone()[0] == len(DATA_FIXES)
     assert conn.execute("SELECT status FROM invoices ORDER BY id").fetchall() == [
-        ("paid",), ("sent",), ("draft",), ("draft",)]
+        ("paid",), ("draft",), ("draft",), ("draft",), ("draft",), ("sent",)]
+    assert conn.execute("SELECT COUNT(DISTINCT student_id) FROM lessons WHERE invoice_id = 3").fetchone()[0] == 2   # the Wu family
+    assert conn.execute("SELECT COUNT(*) FROM register_checks").fetchone()[0] == 10
+    assert conn.execute("SELECT status, COUNT(*) FROM lessons GROUP BY status ORDER BY status").fetchall() == [
+        ("cancelled", 1), ("holiday", 1), ("missed", 1), ("taught", 64)]
     assert conn.execute("SELECT COUNT(*) FROM students WHERE active = 0").fetchone()[0] == 1
     conn.close()
-    assert len(os.listdir(tmp_path / "invoices_pdfs")) == 4
+    assert len(os.listdir(tmp_path / "invoices_pdfs")) == 2

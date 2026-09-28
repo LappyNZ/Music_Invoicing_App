@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import datetime, time
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
+import billing as B
 from db import get_db
-from utils import DATETIME_FORMAT
+from utils import DATETIME_FORMAT, DAY_NAMES, DAYS, fmt_clock
 
 students_bp = Blueprint("students_bp", __name__)
 
@@ -13,6 +14,30 @@ BLANK_SCHOOL = "__blank__"  # the school filter's value for students with no sch
 def back_to_list(form):
     filters = {key: form.get(f"return_{key}", "").strip() for key in ("show", "school", "q")}
     return redirect(url_for("students_bp.students", **{k: v for k, v in filters.items() if v}))
+
+
+def regular_lesson(form):
+    """(day, start, minutes, rate) of the student's regular lesson; a part left blank or not understood is None."""
+    day, minutes, rate = form.get("lesson_day", type=int), form.get("lesson_minutes", type=int), form.get("lesson_rate", type=float)
+    start = form.get("lesson_start", "").strip()
+    try:
+        start = time.fromisoformat(start).strftime("%H:%M") if start else None
+    except ValueError:
+        start = None
+    return (day if day and 1 <= day <= 7 else None, start, minutes if minutes and 5 <= minutes <= 240 else None,
+            rate if rate is not None and 0 <= rate <= 1000 else None)
+
+
+def regular_text(student):
+    """Tue 4:00 pm, 30 min, $70/h"""
+    parts = []
+    if student["lesson_day"] and student["lesson_start"]:
+        parts.append(f"{DAYS[student['lesson_day'] - 1]} {fmt_clock(time.fromisoformat(student['lesson_start']))}")
+    if student["lesson_minutes"]:
+        parts.append(f"{student['lesson_minutes']} min")
+    if student["lesson_rate"] is not None:
+        parts.append(f"${student['lesson_rate']:g}/h")
+    return ", ".join(parts)
 
 
 # ---------------- Create Student ----------------
@@ -28,8 +53,9 @@ def students():
         phone = request.form["phone"]
         school = request.form.get("school", "").strip()
         cur.execute(
-            "INSERT INTO students (name, email, parent, phone, school) VALUES (?, ?, ?, ?, ?)",
-            (name, email, parent, phone, school),
+            """INSERT INTO students (name, email, parent, phone, school, lesson_day, lesson_start, lesson_minutes, lesson_rate)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (name, email, parent, phone, school, *regular_lesson(request.form)),
         )
         conn.commit()
         conn.close()
@@ -43,7 +69,8 @@ def students():
 
     base_sql = """
         SELECT students.*,
-               (SELECT COUNT(*) FROM invoices WHERE invoices.student_id = students.id) AS invoice_count,
+               (SELECT COUNT(*) FROM invoices WHERE invoices.student_id = students.id
+                   OR invoices.id IN (SELECT invoice_id FROM lessons WHERE lessons.student_id = students.id)) AS invoice_count,
                (SELECT COUNT(*) FROM lessons WHERE lessons.student_id = students.id) AS lesson_count
         FROM students WHERE 1=1
     """
@@ -63,7 +90,7 @@ def students():
     base_sql += " ORDER BY name COLLATE NOCASE"
 
     cur.execute(base_sql, params)
-    students = cur.fetchall()
+    students = [dict(s, lesson_text=regular_text(s)) for s in cur.fetchall()]
 
     # For the school dropdown (read as tuples so we don't depend on row_factory)
     cur.execute("SELECT DISTINCT COALESCE(school,'') FROM students ORDER BY 1")
@@ -81,6 +108,7 @@ def students():
         q=q,
         show=show,
         archived_count=archived_count,
+        day_names=DAY_NAMES,
     )
 
 # ---------------- Edit Student ----------------
@@ -91,16 +119,31 @@ def edit_student(student_id):
     parent = request.form["parent"]
     phone = request.form["phone"]
     school = request.form.get("school", "").strip()
+    day, start, minutes, rate = regular_lesson(request.form)
 
     conn = get_db()
     cur = conn.cursor()
+    before = cur.execute("SELECT lesson_rate FROM students WHERE id=?", (student_id,)).fetchone()
     cur.execute(
-        "UPDATE students SET name=?, email=?, parent=?, phone=?, school=? WHERE id=?",
-        (name, email, parent, phone, school, student_id),
+        """UPDATE students SET name=?, email=?, parent=?, phone=?, school=?, lesson_day=?, lesson_start=?, lesson_minutes=?,
+               lesson_rate=? WHERE id=?""",
+        (name, email, parent, phone, school, day, start, minutes, rate, student_id),
     )
+    message = "Student updated successfully"
+    if before and rate is not None and rate != before["lesson_rate"] and request.form.get("apply_rate") == "1":
+        # Their lessons not invoiced yet (or on a draft) use the new rate; sent invoices stay as they are.
+        not_sent = "(invoice_id IS NULL OR invoice_id IN (SELECT id FROM invoices WHERE status IN ('draft', 'revising')))"
+        drafts = [r[0] for r in cur.execute(f"SELECT DISTINCT invoice_id FROM lessons WHERE student_id=? AND kind='regular' AND invoice_id > 0 AND {not_sent}",
+                                            (student_id,)).fetchall()]
+        changed = cur.execute(f"UPDATE lessons SET rate=? WHERE student_id=? AND kind='regular' AND rate != ? AND {not_sent}",
+                              (rate, student_id, rate)).rowcount
+        for invoice_id in drafts:
+            B.refresh_total(conn, invoice_id)
+        if changed:
+            message += f". {changed} lesson{'s' if changed != 1 else ''} not invoiced yet now use ${rate:g} an hour"
     conn.commit()
     conn.close()
-    flash("Student updated successfully", "success")
+    flash(message + ".", "success")
     return back_to_list(request.form)
 
 # ---------------- Archive / Restore Student ----------------
@@ -141,7 +184,9 @@ def delete_student(student_id):
     conn = get_db()
     cur = conn.cursor()
     student = cur.execute("SELECT name FROM students WHERE id=?", (student_id,)).fetchone()
-    invoice_count = cur.execute("SELECT COUNT(*) FROM invoices WHERE student_id=?", (student_id,)).fetchone()[0]
+    invoice_count = cur.execute("""SELECT COUNT(*) FROM invoices WHERE student_id=?
+                                     OR id IN (SELECT invoice_id FROM lessons WHERE student_id=?)""",
+                                (student_id, student_id)).fetchone()[0]
     if not student:
         flash("Student not found.", "danger")
     elif invoice_count:

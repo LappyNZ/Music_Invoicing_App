@@ -1,6 +1,7 @@
 import os
 import tempfile
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,6 +27,8 @@ def app(tmp_path):
         TESTING=True,
         DB_PATH=str(tmp_path / "test.db"),
         INVOICE_PDF_DIR=str(tmp_path / "pdfs"),
+        TODAY="",
+        SENDER_EMAIL="teacher@example.com",
     )
     os.makedirs(flask_app.config["INVOICE_PDF_DIR"], exist_ok=True)
     with flask_app.app_context():
@@ -92,6 +95,73 @@ def make_invoice(db):
                VALUES (?, '2026-07-20', '2026-09-25', ?, ?, ?, ?)""",
             (student_id, total, emailed_at, status, paid_amount),
         )
+        # numbered the way the upgrade numbers invoices made before numbers were stored
+        db.execute("""UPDATE invoices SET invoice_number = 'INV-' || substr(created_at, 1, 4) || '-' || printf('%04d', id),
+                          pdf_filename = 'INV-' || substr(created_at, 1, 4) || '-' || printf('%04d', id) || '.pdf' WHERE id=?""",
+                   (cur.lastrowid,))
+        db.commit()
+        return cur.lastrowid
+    return _make
+
+
+@pytest.fixture
+def today(app):
+    """Sets the date the app thinks it is, e.g. today("2026-09-28")."""
+    def _pin(iso):
+        app.config["TODAY"] = iso
+    return _pin
+
+
+@pytest.fixture
+def terms(db):
+    """The terms the database starts with, by name: {"Term 3 2026": 1, ...}."""
+    return {r["name"]: r["id"] for r in db.execute("SELECT id, name FROM terms")}
+
+
+@pytest.fixture
+def gmail(app, monkeypatch):
+    """Stands in for Gmail: records what would be sent, or fails the way it's told to."""
+    from services import invoice_service
+    outbox, problem = [], {}
+
+    def fake_send(**message):
+        if "error" in problem:
+            raise problem["error"]
+        outbox.append(message)
+        return {"status": "sent", "to": message["to_email"]}
+
+    monkeypatch.setattr(invoice_service, "send_invoice_via_gmail", fake_send)
+    return SimpleNamespace(outbox=outbox, fail_with=lambda e: problem.update(error=e))
+
+
+@pytest.fixture
+def term3(db):
+    return db.execute("SELECT * FROM terms WHERE name='Term 3 2026'").fetchone()
+
+
+@pytest.fixture
+def term4(db):
+    return db.execute("SELECT * FROM terms WHERE name='Term 4 2026'").fetchone()
+
+
+@pytest.fixture
+def student(db):
+    """A student, with the email and parent the register tests expect."""
+    def _make(name="Alice Aroha", email=None, parent="Pat Aroha", **regular):
+        cur = db.execute("INSERT INTO students (name, email, parent, phone, school) VALUES (?, ?, ?, '', '')",
+                         (name, email or name.split()[0].lower() + "@example.com", parent))
+        if regular:   # lesson_day, lesson_start, lesson_minutes, lesson_rate
+            db.execute(f"UPDATE students SET {', '.join(k + '=?' for k in regular)} WHERE id=?", (*regular.values(), cur.lastrowid))
+        db.commit()
+        return cur.lastrowid
+    return _make
+
+
+@pytest.fixture
+def lesson(db):
+    def _make(student_id, when="2026-07-20 15:30", minutes=30, rate=70, status="taught", kind="regular", note=None):
+        cur = db.execute("INSERT INTO lessons (student_id, lesson_time, duration, rate, status, kind, note) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                         (student_id, when, minutes, rate, status, kind, note))
         db.commit()
         return cur.lastrowid
     return _make

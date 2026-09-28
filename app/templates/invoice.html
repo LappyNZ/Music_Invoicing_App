@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow on-glass mb-1">{{ term.name if term else 'Before terms' }} · invoice</p>
+    <h2 class="page-title d-flex flex-wrap align-items-center gap-2">{{ number }} <span class="chip chip-{{ tone or 'plain' }} fs-6">{{ label }}</span></h2>
+    <p class="page-sub">To {{ bill_to }} ({{ payer.email if payer else 'no email' }}) for {{ names }}</p>
+  </div>
+  <div class="tools">
+    <a class="btn btn-sm btn-light-glass" href="{{ url_for('invoices_bp.invoice_list', term=term.id if term else None) }}">← {{ term.name ~ ' invoices' if term else 'All invoices' }}</a>
+  </div>
+</div>
+
+<ul class="nav nav-tabs inv-tabs mb-3" role="tablist">
+  {% for key, name in [('invoice', 'Invoice'), ('email', 'Email'), ('history', 'History')] %}
+  <li class="nav-item"><a class="nav-link{{ ' active' if tab == key }}" {% if tab == key %}aria-current="page"{% endif %}
+     href="{{ url_for('invoices_bp.invoice', invoice_id=inv.id, tab=key if key != 'invoice' else None) }}">{{ name }}</a></li>
+  {% endfor %}
+</ul>
+
+{% if tab == 'email' %}
+{# ---------------- the email ---------------- #}
+<section class="panel">
+  <dl class="row mb-2">
+    <dt class="col-sm-2">To</dt><dd class="col-sm-10">{{ bill_to }} &lt;{{ payer.email if payer else '' }}&gt;</dd>
+    <dt class="col-sm-2">Attached</dt><dd class="col-sm-10">{{ number }}.pdf</dd>
+  </dl>
+  {% if editable %}
+  <form method="post" action="{{ url_for('invoices_bp.save_email', invoice_id=inv.id) }}">
+    <div class="mb-2"><label class="form-label" for="em-subject">Subject</label>
+      <input type="text" id="em-subject" name="subject" class="form-control" value="{{ subject }}"></div>
+    <div class="mb-2"><label class="form-label" for="em-body">Message</label>
+      <textarea id="em-body" name="body" class="form-control" rows="16">{{ body }}</textarea></div>
+    <div class="d-flex flex-wrap gap-2 align-items-center">
+      <button class="btn btn-teal" type="submit" name="action" value="save">Save wording</button>
+      {% if own_wording %}<button class="btn btn-light-glass border" type="submit" name="action" value="reset">Back to the standard wording</button>
+      <span class="chip chip-warn">Uses your own wording</span>{% endif %}
+    </div>
+    <p class="hint mt-2 mb-0">Changes are for this invoice only. If you change the invoice afterwards, check the total in your wording still matches ({{ total|money }}).</p>
+  </form>
+  {% elif versions %}
+  <p class="mb-1"><b>{{ versions[0].email_subject }}</b></p>
+  <pre class="email-text mb-0">{{ versions[0].email_body }}</pre>
+  <p class="hint mt-2 mb-0">This is what was sent{% if versions[0].sent_to %} to {{ versions[0].sent_to }}{% else %} (it wasn’t emailed){% endif %}.</p>
+  {% else %}
+  <p class="mb-0">{{ 'Emailed to ' ~ inv.emailed_to if inv.emailed_to else 'Sent' }} before the app kept a copy of each email.</p>
+  {% endif %}
+</section>
+
+{% elif tab == 'history' %}
+{# ---------------- history ---------------- #}
+<section class="panel">
+  {% if versions %}
+  <h3>Sent</h3>
+  <ul class="history mb-3">
+    {% for v in versions %}
+    <li><time>{{ v.sent_at }}</time><span>Version {{ v.revision }}, {{ v.total_cents|money }}{% if v.sent_to %}, emailed to {{ v.sent_to }}{% else %}, not emailed{% endif %}</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <h3>Everything that happened</h3>
+  <ul class="history mb-0">
+    {% for e in events %}<li><time>{{ e.at }}</time><span>{{ e.text }}</span></li>
+    {% else %}<li><span>Nothing recorded yet.</span></li>{% endfor %}
+  </ul>
+</section>
+
+{% else %}
+{# ---------------- the invoice ---------------- #}
+{% if state == 'revising' %}
+<div class="panel warn mb-3"><b>You’re correcting this invoice.</b> Change the register or the items, then resend it. The email says it replaces the one sent earlier.</div>
+{% endif %}
+{% if changes %}
+<div class="panel warn mb-3">
+  <b>The register changed after this invoice was sent.</b>
+  <ul class="mb-2 mt-1">{% for c in changes[:6] %}<li>{{ c }}</li>{% endfor %}</ul>
+  <form method="post" action="{{ url_for('invoices_bp.correct', invoice_id=inv.id) }}"><button class="btn btn-teal btn-sm" type="submit">Correct and resend</button></form>
+</div>
+{% endif %}
+{% if state == 'carried' %}
+<div class="panel mb-3">{% if carried_to %}The {{ owing|money }} still owing is on <a href="{{ url_for('invoices_bp.invoice', invoice_id=carried_to.id) }}">{{ carried_to.invoice_number }}</a>, so nothing more is expected here.
+  {% else %}The {{ owing|money }} still owing will go on this family’s next invoice.{% endif %}</div>
+{% elif state == 'written_off' %}
+<div class="panel mb-3">Written off{% if inv.write_off_reason %}: {{ inv.write_off_reason }}{% endif %}. It stays in your records and isn’t counted as owing.</div>
+{% elif state == 'void' %}
+<div class="panel mb-3">Void{% if inv.void_reason %}: {{ inv.void_reason }}{% endif %}. It stays in your records for reference.</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    {% if legacy %}
+    <section class="panel">
+      <p class="mb-0">Made before invoices were kept line by line, so only its total ({{ total|money }}) is kept.</p>
+    </section>
+    {% else %}
+    <section class="panel">
+      <h3>What’s on it</h3>
+      <ul class="lines">
+        {% for l in lines %}
+        <li class="k-{{ l.kind }}">
+          <span>{{ l.text }}{% if l.kind == 'missed' %} <span class="chip chip-warn">charged</span>{% elif l.kind == 'extra' %} <span class="chip chip-extra">extra</span>{% endif %}</span>
+          <span class="amt">{{ 'no charge' if l.kind == 'cancelled' else l.cents|money }}</span>
+          {% if l.lesson_id and l.week and term %}
+          <a class="btn btn-sm btn-link-dark" href="{{ url_for('register_bp.register', term=term.id, week=l.week) }}#lesson-{{ l.lesson_id }}" title="Change it in the register">Register</a>
+          {% elif editable and l.item_id %}
+          <form method="post" action="{{ url_for('invoices_bp.remove_item', invoice_id=inv.id, item_id=l.item_id) }}"><button class="btn btn-sm btn-link-danger" type="submit">Remove</button></form>
+          {% else %}<span></span>{% endif %}
+        </li>
+        {% else %}
+        <li><span class="muted">Nothing on it yet.</span><span></span><span></span></li>
+        {% endfor %}
+        <li class="total"><span>Total</span><span class="amt">{{ total|money }}</span><span></span></li>
+      </ul>
+      {% if editable %}
+      <form method="post" action="{{ url_for('invoices_bp.add_item', invoice_id=inv.id) }}" class="row g-2 align-items-end mt-2">
+        <div class="col-sm-7"><label class="form-label" for="it-desc">Add an item</label><input id="it-desc" type="text" name="description" class="form-control" placeholder="e.g. ABRSM Grade 5 exam entry" required></div>
+        <div class="col-sm-3"><label class="form-label" for="it-amount">Amount</label><input id="it-amount" type="text" name="amount" inputmode="decimal" class="form-control" placeholder="120.00" required></div>
+        <div class="col-sm-2"><button class="btn btn-teal w-100" type="submit">Add</button></div>
+      </form>
+      <p class="hint mt-2 mb-0">For a discount, use a minus amount (e.g. −20). Lessons come from the register: use <b>Register</b> next to one to change it, and this invoice updates by itself.</p>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    {% if state not in ('draft',) %}
+    <section class="panel">
+      <div class="money-box mb-2">
+        <div><span>Total</span><b>{{ total|money }}</b></div>
+        <div><span>Paid</span><b>{{ paid|money }}</b></div>
+        <div><span>{{ 'In credit' if owing < 0 else 'Still to pay' }}</span><b>{{ (0 if state in ('carried', 'written_off', 'void') or (state == 'paid' and owing > 0) else (owing|abs))|money }}</b></div>
+      </div>
+      {% if payments %}
+      <ul class="history">
+        {% for p in payments %}
+        <li><time>{{ fmt_full(p.paid_on|todate) }}</time>
+          <span class="d-flex gap-2 align-items-center">{{ p.amount_cents|money }}{% if p.reference %} · ref {{ p.reference }}{% endif %}
+            <form method="post" action="{{ url_for('invoices_bp.delete_payment', invoice_id=inv.id, payment_id=p.id) }}" class="ms-auto">
+              <button class="btn btn-sm btn-link-danger" type="submit" title="Remove this payment">Remove</button></form></span></li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if state in ('unpaid', 'part') %}
+      <form method="post" action="{{ url_for('invoices_bp.add_payment', invoice_id=inv.id) }}" class="row g-2 align-items-end mt-1">
+        <div class="col-sm-3"><label class="form-label" for="pay-amount">Amount received</label><input id="pay-amount" type="text" name="amount" inputmode="decimal" class="form-control" value="{{ '%.2f'|format(owing / 100) }}" required></div>
+        <div class="col-sm-4"><label class="form-label" for="pay-date">Date it arrived</label><input id="pay-date" type="date" name="paid_on" class="form-control" value="{{ today_iso }}" required></div>
+        <div class="col-sm-3"><label class="form-label" for="pay-ref">Bank reference</label><input id="pay-ref" type="text" name="reference" class="form-control" placeholder="optional"></div>
+        <div class="col-sm-2"><button class="btn btn-teal w-100" type="submit">Save</button></div>
+      </form>
+      {% endif %}
+    </section>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-5">
+    <div class="paper" aria-label="How the invoice looks">
+      <div class="p-top">
+        <img src="{{ url_for('static', filename='logo_Small.png') }}" alt="">
+        <div class="p-title">Invoice<span>{{ number }}</span><span>{{ fmt_full(versions[0].sent_at|todate) if versions and not editable else issued }}</span></div>
+      </div>
+      {% if inv.revision > 1 %}<p class="fw-bold mt-2 mb-0" style="color:#8a4f00">Corrected invoice (version {{ inv.revision }}). It replaces the one sent earlier.</p>{% endif %}
+      <div class="p-meta">
+        <div><b>Bill to</b>{{ bill_to }}<br>{{ payer.email if payer else '' }}</div>
+        <div><b>For</b>{{ names }}<br>{{ period }}</div>
+      </div>
+      <table>
+        <thead><tr><th>Description</th><th>Amount</th></tr></thead>
+        <tbody>
+          {% if legacy %}<tr><td>Cello lessons, {{ period }}</td><td>{{ total|money }}</td></tr>
+          {% else %}{% for l in lines %}<tr class="{{ 'nc' if l.kind == 'cancelled' }}"><td>{{ l.text }}</td><td>{{ 'no charge' if l.kind == 'cancelled' else l.cents|money }}</td></tr>{% endfor %}{% endif %}
+        </tbody>
+        <tfoot><tr><td>Total</td><td>{{ total|money }}</td></tr></tfoot>
+      </table>
+      <div class="p-pay"><b>Prompt payment is appreciated.</b><br>Please pay to: {{ bank }}<br>Reference: <b>{{ number }}</b><br>Particulars: <b>{{ particulars }}</b></div>
+    </div>
+    {% if editable or pdf_exists %}
+    <p class="mt-2 mb-0"><a class="on-glass" href="{{ url_for('invoices_bp.pdf', invoice_id=inv.id) }}" target="_blank" rel="noopener">View the PDF{{ ' as it will be sent' if editable }}</a></p>
+    {% endif %}
+  </div>
+</div>
+
+{# ---------------- what can be done now ---------------- #}
+<section class="panel mt-3 d-flex flex-wrap gap-2 align-items-center">
+  {% if state == 'draft' or state == 'revising' %}
+    <form method="post" action="{{ url_for('invoices_bp.send', invoice_id=inv.id) }}" class="order-last ms-auto" data-confirm-send>
+      <button class="btn btn-teal btn-lg" type="submit" {{ 'disabled' if not payer or not payer.email }}>{{ 'Resend corrected invoice' if state == 'revising' else 'Send to ' ~ (payer.email if payer else '') }}</button></form>
+    <form method="post" action="{{ url_for('invoices_bp.test_copy', invoice_id=inv.id) }}"><button class="btn btn-light-glass border" type="submit">Email me a copy first</button></form>
+    {% if state == 'draft' %}
+    <form method="post" action="{{ url_for('invoices_bp.mark_sent', invoice_id=inv.id) }}"><button class="btn btn-link-dark" type="submit">Mark as sent without emailing</button></form>
+    <form method="post" action="{{ url_for('invoices_bp.delete_draft', invoice_id=inv.id) }}" data-confirm="Delete this draft? Its lessons will go on the next invoices you make."><button class="btn btn-link-danger" type="submit">Delete draft</button></form>
+    {% else %}
+    <form method="post" action="{{ url_for('invoices_bp.cancel_correction', invoice_id=inv.id) }}"><button class="btn btn-link-dark" type="submit">Cancel the correction</button></form>
+    {% endif %}
+  {% elif state in ('unpaid', 'part', 'paid') %}
+    {% if not legacy %}<form method="post" action="{{ url_for('invoices_bp.correct', invoice_id=inv.id) }}"><button class="btn btn-light-glass border" type="submit">Correct and resend</button></form>{% endif %}
+    {% if versions and versions[0].sent_to %}<form method="post" action="{{ url_for('invoices_bp.again', invoice_id=inv.id) }}"><button class="btn btn-light-glass border" type="submit">Email it again</button></form>{% endif %}
+    {% if state != 'paid' %}
+    <form method="post" action="{{ url_for('invoices_bp.move_to_next', invoice_id=inv.id) }}"><button class="btn btn-link-dark" type="submit">Move what’s owing to the next invoice</button></form>
+    <details class="w-100"><summary class="btn btn-link-dark d-inline-block">Write off…</summary>
+      <form method="post" action="{{ url_for('invoices_bp.write_off', invoice_id=inv.id) }}" class="row g-2 align-items-end mt-1">
+        <div class="col-sm-9"><label class="form-label" for="wo-reason">Why (for your records)</label><input id="wo-reason" type="text" name="reason" class="form-control" placeholder="e.g. Family moved away, no reply to reminders"></div>
+        <div class="col-sm-3"><button class="btn btn-danger w-100" type="submit">Write off {{ owing|money }}</button></div></form></details>
+    {% endif %}
+    {% if not payments %}
+    <details class="w-100"><summary class="btn btn-link-danger d-inline-block">Void…</summary>
+      <form method="post" action="{{ url_for('invoices_bp.void', invoice_id=inv.id) }}" class="row g-2 align-items-end mt-1">
+        <div class="col-sm-9"><label class="form-label" for="void-reason">Reason</label><input id="void-reason" type="text" name="reason" class="form-control" placeholder="e.g. Sent to the wrong family"></div>
+        <div class="col-sm-3"><button class="btn btn-danger w-100" type="submit">Void it</button></div></form>
+      <p class="hint mb-0 mt-1">For an invoice that shouldn’t have been sent at all. Its lessons can then go on a new invoice. You can undo this.</p></details>
+    {% endif %}
+  {% elif state in ('carried', 'written_off', 'void') %}
+    <form method="post" action="{{ url_for('invoices_bp.undo', invoice_id=inv.id) }}"><button class="btn btn-light-glass border" type="submit">Undo</button></form>
+  {% endif %}
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Ask before anything that emails a family or can't be undone; ignore double clicks once confirmed.
+  document.querySelectorAll('form[data-confirm-send], form[data-confirm]').forEach((form) => {
+    let sent = false;
+    form.addEventListener('submit', (e) => {
+      if (sent) { e.preventDefault(); return; }
+      const button = form.querySelector('button[type="submit"]');
+      const message = form.dataset.confirm || `${button.textContent.trim()}?`;
+      if (form.dataset.confirmArmed !== '1') {
+        e.preventDefault();
+        form.dataset.confirmArmed = '1';
+        button.dataset.label = button.textContent;
+        button.textContent = 'Press again to confirm';
+        setTimeout(() => { if (!sent) { form.dataset.confirmArmed = ''; button.textContent = button.dataset.label; } }, 5000);
+        return;
+      }
+      sent = true;
+      setTimeout(() => { button.disabled = true; }, 0);
+    });
+  });
+});
+</script>
+{% endblock %}
