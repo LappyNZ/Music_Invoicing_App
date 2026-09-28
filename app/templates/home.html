@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-3">
+  <p class="eyebrow on-glass mb-1">{{ fmt_long(today) }}</p>
+  <h2 class="page-title">{{ title }}</h2>
+  {% if sub %}<p class="page-sub">{{ sub }}</p>{% endif %}
+</div>
+
+<section class="panel next-step" aria-label="Next step">
+  <div>
+    <p class="eyebrow muted mb-1">Next step</p>
+    <h3 class="mb-1">{{ step.title }}</h3>
+    <p class="muted mb-0" style="max-width: 62ch">{{ step.text }}</p>
+  </div>
+  {% if step.url %}<a class="btn btn-teal btn-lg" href="{{ step.url }}">{{ step.label }}</a>{% endif %}
+</section>
+
+{% if steps %}
+<p class="eyebrow on-glass mt-4 mb-0">{{ term.name }}</p>
+<div class="steps-row">
+  {% for s in steps %}
+  <a class="step-card{{ ' done' if s.done }}" href="{{ s.url }}">
+    <small><span>{{ loop.index }}. {{ s.name }}</span><span>{{ '✓ Done' if s.done }}</span></small>
+    <b>{{ s.text }}</b>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <section class="panel h-100" aria-labelledby="owe-h">
+      <div class="d-flex align-items-center gap-2">
+        <h3 id="owe-h" class="mb-0 me-auto">Waiting for payment</h3>
+        <b class="num">{{ owing|money }}</b>
+      </div>
+      {% if waiting %}
+      <ul class="mini-list">
+        {% for r in waiting %}
+        <li>
+          <span class="who"><b>{{ r.names }}</b><small>{{ r.number }} · {{ r.term }}{% if r.sent %} · sent {{ fmt_dm(r.sent|todate) }}{% endif %}</small></span>
+          <span class="num">{{ r.owing|money }}</span>
+          <span class="chip chip-{{ r.tone or 'plain' }}">{{ r.label }}</span>
+          <a class="btn btn-sm btn-link-dark" href="{{ url_for('invoices_bp.invoice', invoice_id=r.id) }}">Open</a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if waiting_count > waiting|length %}
+      <a class="btn btn-sm btn-link-dark mt-1" href="{{ url_for('invoices_bp.invoice_list', show='unpaid') }}">See all {{ waiting_count }}</a>
+      {% endif %}
+      {% else %}
+      <p class="muted mt-2 mb-0">Nobody owes anything.</p>
+      {% endif %}
+    </section>
+  </div>
+  <div class="col-lg-5">
+    <section class="panel h-100" aria-labelledby="next-h">
+      <h3 id="next-h">Coming up</h3>
+      {% if next_up %}
+      <p class="mb-2">{{ next_up.name }} starts {{ fmt_long(next_up.start_date|todate) }}.</p>
+      <a class="btn btn-light-glass border" href="{{ url_for('register_bp.start_term', term=next_up.id) }}">Get {{ next_up.name }} ready</a>
+      {% elif upcoming %}
+      <p class="mb-2">{{ upcoming.name }} is set up and starts {{ fmt_long(upcoming.start_date|todate) }}.</p>
+      <a class="btn btn-light-glass border" href="{{ url_for('register_bp.register', term=upcoming.id) }}">Open its register</a>
+      {% else %}
+      <p class="mb-2">When you know the next term’s dates, set it up here.</p>
+      <a class="btn btn-light-glass border" href="{{ url_for('register_bp.start_term') }}">Start the next term</a>
+      {% endif %}
+    </section>
+  </div>
+</div>
+{% endblock %}

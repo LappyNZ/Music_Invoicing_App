@@ -7,107 +7,169 @@ from google.auth.exceptions import RefreshError
 from google.oauth2.credentials import Credentials
 
 import gmail_auth
-from services import email_service, invoice_service
+from helpers import draft_for, page
+from services import email_service
 from services.email_service import GmailNotConnected
-from utils import invoice_number_of, pdf_filename_of
+
+FETCH = {"X-Requested-With": "fetch"}
+
+
+@pytest.fixture(autouse=True)
+def after_term3(today):
+    today("2026-09-28")
 
 
 @pytest.fixture
-def gmail(app, monkeypatch):
-    """Stands in for Gmail: records what would be sent, or fails the way it's told to."""
-    outbox, problem = [], {}
-
-    def fake_send(**message):
-        if "error" in problem:
-            raise problem["error"]
-        outbox.append(message)
-        return {"status": "sent", "to": message["to_email"]}
-
-    monkeypatch.setattr(invoice_service, "send_invoice_via_gmail", fake_send)
-    return SimpleNamespace(outbox=outbox, fail_with=lambda e: problem.update(error=e))
+def draft(client, db, term3, student, lesson):
+    """A Term 3 draft for Alice, whose mum Pat pays: two lessons, $70."""
+    alice = student("Alice Aroha", "pat@example.com", parent="Pat Aroha")
+    lesson(alice, "2026-07-20 15:30")
+    lesson(alice, "2026-07-27 15:30")
+    client.post("/invoices/make", data={"term": term3["id"]})
+    return draft_for(db, alice)["id"]
 
 
-@pytest.fixture
-def pdf_for(app, db):
-    """Gives an invoice the PDF file it would have had."""
-    def _make(invoice_id):
-        inv = db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
-        with open(os.path.join(app.config["INVOICE_PDF_DIR"], pdf_filename_of(inv)), "wb") as f:
-            f.write(b"%PDF-1.4 test")
-        return invoice_id
-    return _make
+def invoice(db, invoice_id):
+    return db.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
 
 
-def status_of(db, invoice_id):
-    return db.execute("SELECT status, emailed_to FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+def test_sending_emails_the_invoice_with_its_pdf_and_keeps_what_was_sent(client, db, app, gmail, draft):
+    number = invoice(db, draft)["invoice_number"]
 
+    result = client.post(f"/invoices/{draft}/send", headers=FETCH).get_json()
 
-def test_sending_one_invoice_emails_it_and_marks_it_sent(client, db, gmail, make_student, make_invoice, pdf_for):
-    invoice = pdf_for(make_invoice(make_student(email="pat@example.com")))
-
-    result = client.post(f"/invoices/send/{invoice}").get_json()
-
-    number = invoice_number_of(db.execute("SELECT * FROM invoices WHERE id=?", (invoice,)).fetchone())
     assert result == {"status": "sent", "message": f"{number}: emailed to pat@example.com."}
-    assert [m["to_email"] for m in gmail.outbox] == ["pat@example.com"]
-    assert tuple(status_of(db, invoice)) == ("sent", "pat@example.com")
+    message = gmail.outbox[0]
+    assert message["to_email"] == "pat@example.com"
+    assert f"Reference: {number}" in message["body_text"] and "Particulars: Alice Aroha" in message["body_text"]
+    assert message["pdf_fullpath"] == os.path.join(app.config["INVOICE_PDF_DIR"], f"{number}.pdf")
+    assert os.path.isfile(message["pdf_fullpath"])
+    row = invoice(db, draft)
+    assert (row["status"], row["emailed_to"], row["pdf_filename"], row["total_cents"]) == ("sent", "pat@example.com", f"{number}.pdf", 7000)
+    version = db.execute("SELECT * FROM invoice_versions").fetchone()
+    assert (version["revision"], version["sent_to"], version["total_cents"], version["email_body"]) == (1, "pat@example.com", 7000, message["body_text"])
+
+
+def test_the_address_older_pages_used_still_sends(client, db, gmail, draft):
+    assert client.post(f"/invoices/send/{draft}", headers=FETCH).get_json()["status"] == "sent"
+
+
+def test_an_invoice_is_only_sent_once(client, db, gmail, draft):
+    client.post(f"/invoices/{draft}/send", headers=FETCH)
+
+    result = client.post(f"/invoices/{draft}/send", headers=FETCH).get_json()
+
+    assert result["status"] == "skipped" and len(gmail.outbox) == 1
 
 
 @pytest.mark.parametrize("status", ["paid", "void"])
-def test_paid_and_void_invoices_are_not_sent(client, db, gmail, make_student, make_invoice, pdf_for, status):
-    invoice = pdf_for(make_invoice(make_student(), status=status))
+def test_paid_and_void_invoices_are_not_sent(client, db, gmail, make_student, make_invoice, status):
+    old = make_invoice(make_student(), status=status)
 
-    result = client.post(f"/invoices/send/{invoice}").get_json()
+    result = client.post(f"/invoices/{old}/send", headers=FETCH).get_json()
 
     assert result["status"] == "skipped" and gmail.outbox == []
-    assert status_of(db, invoice)[0] == status
+    assert invoice(db, old)["status"] == status
 
 
-def test_sending_stops_when_gmail_is_not_connected(client, db, gmail, make_student, make_invoice, pdf_for):
-    invoice = pdf_for(make_invoice(make_student()))
+def test_someone_with_no_email_is_skipped(client, db, gmail, draft):
+    db.execute("UPDATE students SET email=''")
+    db.commit()
+
+    result = client.post(f"/invoices/{draft}/send", headers=FETCH).get_json()
+
+    assert result["status"] == "skipped" and "has no email address" in result["message"]
+    assert invoice(db, draft)["status"] == "draft"
+
+
+def test_sending_stops_when_gmail_is_not_connected(client, db, gmail, draft):
     gmail.fail_with(GmailNotConnected("Gmail isn't connected to the app."))
 
-    response = client.post(f"/invoices/send/{invoice}")
+    response = client.post(f"/invoices/{draft}/send", headers=FETCH)
 
     assert response.status_code == 503
     assert response.get_json()["status"] == "gmail_not_connected"
     assert "Gmail needs connecting again" in response.get_json()["message"]
-    assert status_of(db, invoice)[0] == "draft"
+    assert invoice(db, draft)["status"] == "draft"
+    assert db.execute("SELECT COUNT(*) FROM invoice_versions").fetchone()[0] == 0
 
 
-def test_the_all_at_once_fallback_also_stops_when_gmail_is_not_connected(client, db, gmail, make_student,
-                                                                         make_invoice, pdf_for, monkeypatch):
-    invoices = [pdf_for(make_invoice(make_student(f"Student {n}"))) for n in range(3)]
-    attempts = []
+def test_a_failure_for_one_invoice_is_reported_and_it_stays_a_draft(client, db, gmail, draft):
+    gmail.fail_with(ValueError("Invalid To header"))
 
-    def not_connected(**message):
-        attempts.append(message)
-        raise GmailNotConnected("Gmail isn't connected to the app.")
+    result = client.post(f"/invoices/{draft}/send", headers=FETCH).get_json()
 
-    monkeypatch.setattr(invoice_service, "send_invoice_via_gmail", not_connected)
-    page = client.post("/invoices/list", data={"action": "send", "confirm_send": "1",
-                                               "invoice_id": [str(i) for i in invoices]}, follow_redirects=True)
-
-    assert len(attempts) == 1
-    assert "Stopped: Gmail isn" in page.get_data(as_text=True)
-    assert [status_of(db, i)[0] for i in invoices] == ["draft"] * 3
+    assert result["status"] == "failed" and "Invalid To header" in result["message"]
+    assert invoice(db, draft)["status"] == "draft"
 
 
-def test_email_switched_off_is_reported(client, make_student, make_invoice, pdf_for):
-    invoice = pdf_for(make_invoice(make_student()))  # the tests run with EMAIL_ENABLED=0
-
-    result = client.post(f"/invoices/send/{invoice}").get_json()
+def test_email_switched_off_is_reported(client, db, draft):   # the tests run with EMAIL_ENABLED=0
+    result = client.post(f"/invoices/{draft}/send", headers=FETCH).get_json()
 
     assert result["status"] == "blocked" and "switched off" in result["message"]
+    assert invoice(db, draft)["status"] == "draft"
 
 
-def test_the_list_page_sends_one_invoice_per_request(client, make_student, make_invoice):
-    make_invoice(make_student())
+def test_without_javascript_sending_returns_to_the_invoice(client, db, gmail, draft):
+    response = client.post(f"/invoices/{draft}/send")
 
-    page = client.get("/invoices/list").get_data(as_text=True)
+    assert response.headers["Location"].endswith(f"/invoices/{draft}")
+    assert invoice(db, draft)["status"] == "sent"
 
-    assert 'id="sendProgressModal"' in page
-    assert "/invoices/send/0" in page
+
+def test_a_copy_can_be_emailed_to_the_teacher_first(client, db, app, gmail, draft):
+    html = client.post(f"/invoices/{draft}/test-copy", follow_redirects=True).get_data(as_text=True)
+
+    assert "A copy was emailed to teacher@example.com. The family hasn’t been sent anything." in html
+    assert gmail.outbox[0]["to_email"] == "teacher@example.com"
+    assert gmail.outbox[0]["subject"].startswith("[Test copy] Cello lessons")
+    assert invoice(db, draft)["status"] == "draft"
+    assert os.listdir(app.config["INVOICE_PDF_DIR"]) == []
+
+
+def test_marking_as_sent_emails_nobody(client, db, app, gmail, draft):
+    client.post(f"/invoices/{draft}/mark-sent")
+
+    row = invoice(db, draft)
+    assert gmail.outbox == [] and row["status"] == "sent" and row["emailed_to"] is None
+    assert os.path.isfile(os.path.join(app.config["INVOICE_PDF_DIR"], row["pdf_filename"]))
+    assert db.execute("SELECT sent_to FROM invoice_versions").fetchone()[0] is None
+
+
+def test_a_sent_invoice_can_be_emailed_again(client, db, gmail, draft):
+    client.post(f"/invoices/{draft}/send", headers=FETCH)
+
+    client.post(f"/invoices/{draft}/again")
+
+    assert len(gmail.outbox) == 2 and gmail.outbox[1]["body_text"] == gmail.outbox[0]["body_text"]
+
+
+def test_an_old_draft_from_before_terms_sends_its_own_pdf_and_total(client, db, app, gmail, make_student, make_invoice):
+    old = make_invoice(make_student(email="pat@example.com"), total=280)
+    path = os.path.join(app.config["INVOICE_PDF_DIR"], invoice(db, old)["pdf_filename"])
+    with open(path, "wb") as f:
+        f.write(b"%PDF-1.4 test")
+
+    result = client.post(f"/invoices/{old}/send", headers=FETCH).get_json()
+
+    assert result["status"] == "sent"
+    assert gmail.outbox[0]["pdf_fullpath"] == path and "Total: $280.00" in gmail.outbox[0]["body_text"]
+    assert (invoice(db, old)["status"], invoice(db, old)["total"]) == ("sent", 280.0)
+
+
+def test_an_old_draft_without_its_pdf_is_not_sent(client, db, gmail, make_student, make_invoice):
+    old = make_invoice(make_student())
+
+    result = client.post(f"/invoices/{old}/send", headers=FETCH).get_json()
+
+    assert result["status"] == "failed" and "PDF isn’t on the server" in result["message"]
+    assert gmail.outbox == [] and invoice(db, old)["status"] == "draft"
+
+
+def test_the_list_page_sends_one_invoice_per_request(client, draft):
+    html = page(client, "/invoices")
+
+    assert 'id="sendModal"' in html and "/invoices/999999999/send" in html
 
 
 # ---------------- Gmail sign-in ----------------

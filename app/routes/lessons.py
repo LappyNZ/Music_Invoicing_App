@@ -1,6 +1,7 @@
 import math
 
 from flask import Blueprint, render_template, request, redirect, url_for, flash
+import billing as B
 from db import get_db
 from datetime import date, datetime, timedelta
 
@@ -88,9 +89,14 @@ def lessons():
           students.name AS student_name,
           lessons.lesson_time,
           lessons.duration,
-          lessons.rate
+          lessons.rate,
+          lessons.status,
+          lessons.kind,
+          lessons.invoice_id,
+          invoices.invoice_number
         FROM lessons
         JOIN students ON lessons.student_id = students.id
+        LEFT JOIN invoices ON invoices.id = lessons.invoice_id
         WHERE 1=1
     """
     params = []
@@ -142,10 +148,15 @@ def edit_lesson(lesson_id):
 
     conn = get_db()
     cur = conn.cursor()
+    before = cur.execute("SELECT student_id, invoice_id FROM lessons WHERE id=?", (lesson_id,)).fetchone()
     cur.execute("""UPDATE lessons
                    SET student_id=?, lesson_time=?, duration=?, rate=?
                    WHERE id=?""",
                 (request.form["student_id"], when.strftime(DATETIME_FORMAT), duration, rate, lesson_id))
+    if before and before["invoice_id"]:
+        if str(before["student_id"]) != request.form["student_id"]:   # someone else's lesson now: off this invoice
+            cur.execute("UPDATE lessons SET invoice_id=NULL WHERE id=?", (lesson_id,))
+        B.refresh_total(conn, before["invoice_id"])
     conn.commit()
     conn.close()
     flash("Lesson updated successfully", "success")
@@ -156,7 +167,10 @@ def edit_lesson(lesson_id):
 def delete_lesson(lesson_id):
     conn = get_db()
     cur = conn.cursor()
+    before = cur.execute("SELECT invoice_id FROM lessons WHERE id=?", (lesson_id,)).fetchone()
     cur.execute("DELETE FROM lessons WHERE id=?", (lesson_id,))
+    if before and before["invoice_id"]:
+        B.refresh_total(conn, before["invoice_id"])
     conn.commit()
     conn.close()
     flash("Lesson deleted successfully", "success")

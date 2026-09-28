@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not term %}
+<h2 class="page-title">Register</h2>
+<div class="panel mt-3">
+  <p>There’s no term set up yet.</p>
+  <a class="btn btn-teal" href="{{ url_for('register_bp.start_term') }}">Start a term</a>
+</div>
+{% else %}
+{% macro back_fields() -%}
+  <input type="hidden" name="term" value="{{ term.id }}">
+  <input type="hidden" name="week" value="{{ week }}">
+  <input type="hidden" name="view" value="{{ view }}">
+{%- endmacro %}
+
+<div class="page-head">
+  <div>
+    <p class="eyebrow on-glass mb-1">{{ term.name }} · {{ fmt_dm(term.start_date|todate) }} to {{ fmt_dm(term.end_date|todate) }}</p>
+    <h2 class="page-title">Register</h2>
+  </div>
+  <div class="tools">
+    {% if terms|length > 1 %}
+    <form method="get" class="d-flex align-items-center gap-2">
+      <label for="term-pick" class="visually-hidden">Term</label>
+      <select id="term-pick" name="term" class="form-select form-select-sm" onchange="this.form.submit()">
+        {% for t in terms %}<option value="{{ t.id }}"{{ ' selected' if t.id == term.id }}>{{ t.name }}</option>{% endfor %}
+      </select>
+      {% if view == 'term' %}<input type="hidden" name="view" value="term">{% endif %}
+    </form>
+    {% endif %}
+    <div class="btn-group" role="group" aria-label="Show">
+      <a class="btn btn-sm {{ 'btn-teal' if view == 'week' else 'btn-light-glass' }}" href="{{ url_for('register_bp.register', term=term.id, week=week) }}">Week by week</a>
+      <a class="btn btn-sm {{ 'btn-teal' if view == 'term' else 'btn-light-glass' }}" href="{{ url_for('register_bp.register', term=term.id, view='term') }}">Whole term</a>
+    </div>
+  </div>
+</div>
+
+{% if future and not started %}
+<div class="panel warn mb-3">
+  <b>{{ term.name }} hasn’t been set up yet.</b> <a href="{{ url_for('register_bp.start_term', term=term.id) }}">Get it ready</a> to set the days off and check everyone’s regular lesson.
+</div>
+{% endif %}
+
+{% if view == 'week' %}
+<nav class="week-strip" aria-label="Weeks">
+  {% for w in week_list %}
+  <a href="{{ url_for('register_bp.register', term=term.id, week=w.n) }}" class="{{ 'checked' if w.checked }}{{ ' current' if w.n == week }}{{ ' hols' if w.holidays }}"
+     {% if w.n == week %}aria-current="true"{% endif %}>{{ 'Hol' if w.holidays else w.n }}<small>{{ fmt_dm(w.start) }}</small></a>
+  {% endfor %}
+</nav>
+
+<p class="on-glass mb-2">
+  {% if week > term_weeks %}School holidays after the term, {% else %}Week {{ week }}, {% endif %}{{ fmt_day(week_start) }} to {{ fmt_day(week_end) }}.
+  Every lesson starts as <b>Had lesson</b>: change only the ones that were different.
+</p>
+
+{% for g in day_groups %}
+<section class="panel" aria-label="{{ g.title }}">
+  <div class="day-head">
+    <h3>{{ g.title }}</h3>
+    {% if g.holiday %}<span class="chip">{{ g.holiday }}</span>{% endif %}
+    {% if g.cancellable > 1 %}
+    <form method="post" action="{{ url_for('register_bp.cancel_day') }}">
+      {{ back_fields() }}<input type="hidden" name="date" value="{{ g.date.isoformat() }}">
+      <button class="btn btn-sm btn-link-dark" type="submit">Cancel all {{ g.title.split(' ')[0] }} lessons</button>
+    </form>
+    {% endif %}
+  </div>
+  {% for l in g.lessons %}
+  <div class="lesson-row" id="lesson-{{ l.id }}">
+    <span class="time">{{ l.time_text }}</span>
+    <span class="who"><b>{{ l.student_name }}</b>
+      <small>{% if l.kind == 'extra' %}<span class="chip chip-extra">Extra</span> {% endif %}{{ l.duration }} min · ${{ '%g'|format(l.rate) }}/h{% if l.note %} · {{ l.note }}{% endif %}{% if l.billed %} · {{ l.billed }}{% endif %}</small></span>
+    {% if l.status == 'holiday' %}
+    <form class="holiday-tag" method="post" action="{{ url_for('register_bp.set_status', lesson_id=l.id) }}">
+      {{ back_fields() }}<input type="hidden" name="status" value="taught">
+      Holiday: no lesson <button type="submit" class="btn btn-sm btn-link-dark py-0">It happened</button>
+    </form>
+    {% else %}
+    <form class="status3" method="post" action="{{ url_for('register_bp.set_status', lesson_id=l.id) }}" data-status-form aria-label="{{ l.student_name }}, {{ fmt_day(l.when) }}">
+      {{ back_fields() }}
+      <button type="submit" name="status" value="taught" aria-pressed="{{ 'true' if l.status == 'taught' else 'false' }}">Had lesson</button>
+      <button type="submit" name="status" value="cancelled" aria-pressed="{{ 'true' if l.status == 'cancelled' else 'false' }}">Cancelled<small>no charge</small></button>
+      <button type="submit" name="status" value="missed" aria-pressed="{{ 'true' if l.status == 'missed' else 'false' }}">Missed<small>still charged</small></button>
+    </form>
+    {% endif %}
+    <button type="button" class="icon-btn" title="Change this lesson" aria-label="Change {{ l.student_name }}’s lesson"
+            data-bs-toggle="modal" data-bs-target="#editLesson" data-id="{{ l.id }}" data-name="{{ l.student_name }}"
+            data-date="{{ l.when.date().isoformat() }}" data-time="{{ l.when.strftime('%H:%M') }}" data-minutes="{{ l.duration }}"
+            data-rate="{{ '%g'|format(l.rate) }}" data-note="{{ l.note or '' }}" data-kind="{{ l.kind }}"
+            data-status="{{ l.status }}" data-billed="{{ l.billed }}"><i class="bi bi-pencil"></i></button>
+  </div>
+  {% endfor %}
+</section>
+{% else %}
+<div class="panel">No lessons this week.</div>
+{% endfor %}
+
+<details class="panel" id="add-lessons">
+  <summary class="fw-bold" style="cursor:pointer">Add an extra or makeup lesson this week</summary>
+  <form method="post" action="{{ url_for('register_bp.add_extra') }}" class="row g-2 mt-2 align-items-end">
+    {{ back_fields() }}
+    <div class="col-md-3"><label class="form-label" for="x-student">Student</label>
+      <select id="x-student" name="student_id" class="form-select" required>
+        <option value="">Choose…</option>
+        {% for s in students %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-2"><label class="form-label" for="x-date">Day</label>
+      <select id="x-date" name="date" class="form-select">{% for d in week_dates %}<option value="{{ d.isoformat() }}">{{ fmt_day(d) }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><label class="form-label" for="x-time">Time</label><input id="x-time" type="time" name="time" value="16:00" step="300" class="form-control" required></div>
+    <div class="col-md-1"><label class="form-label" for="x-minutes">Minutes</label><input id="x-minutes" type="number" name="minutes" value="30" min="5" max="240" class="form-control" required></div>
+    <div class="col-md-3"><label class="form-label" for="x-note">Note (optional)</label><input id="x-note" type="text" name="note" class="form-control" placeholder="e.g. makeup for 16 Sep"></div>
+    <div class="col-md-1"><button class="btn btn-teal w-100" type="submit">Add</button></div>
+  </form>
+  <p class="hint mb-0 mt-2">It’s charged at the student’s usual rate. You can change it afterwards with the pencil button.</p>
+</details>
+
+<details class="panel">
+  <summary class="fw-bold" style="cursor:pointer">A student starting partway through the term</summary>
+  <form method="post" action="{{ url_for('register_bp.add_weekly') }}" class="row g-2 mt-2 align-items-end">
+    {{ back_fields() }}
+    <div class="col-md-3"><label class="form-label" for="w-student">Student</label>
+      <select id="w-student" name="student_id" class="form-select" required>
+        <option value="">Choose…</option>
+        {% for s in students %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}
+      </select></div>
+    <div class="col-md-2"><label class="form-label" for="w-from">From week</label>
+      <select id="w-from" name="from_week" class="form-select">{% for w in range(1, term_weeks + 1) %}<option value="{{ w }}"{{ ' selected' if w == week }}>{{ w }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><label class="form-label" for="w-day">Day</label>
+      <select id="w-day" name="day" class="form-select">{% for d in days[:6] %}<option value="{{ loop.index }}">{{ d }}</option>{% endfor %}</select></div>
+    <div class="col-md-2"><label class="form-label" for="w-time">Time</label><input id="w-time" type="time" name="time" value="16:00" step="300" class="form-control" required></div>
+    <div class="col-md-1"><label class="form-label" for="w-minutes">Minutes</label><input id="w-minutes" type="number" name="minutes" value="30" min="5" max="240" class="form-control" required></div>
+    <div class="col-md-1"><label class="form-label" for="w-rate">$ / hour</label><input id="w-rate" type="number" name="rate" value="70" min="0" step="0.5" class="form-control" required></div>
+    <div class="col-md-1"><button class="btn btn-teal w-100" type="submit">Add</button></div>
+  </form>
+  <p class="hint mb-0 mt-2">Adds a lesson every week to the end of the term, and keeps it as their regular lesson for next term.</p>
+</details>
+
+{% if week <= term_weeks %}
+<div class="panel {{ 'good' if week in checked }} week-done mt-3">
+  {% if week in checked %}
+  <span><b>Week {{ week }} is checked.</b> <span class="muted">You can still change it.</span></span>
+  <span class="d-flex gap-2 flex-wrap">
+    <form method="post" action="{{ url_for('register_bp.check_week') }}">{{ back_fields() }}<input type="hidden" name="checked" value="0">
+      <button class="btn btn-sm btn-link-dark" type="submit">Mark as not checked</button></form>
+    {% if next_unchecked %}<a class="btn btn-teal" href="{{ url_for('register_bp.register', term=term.id, week=next_unchecked) }}">Go to week {{ next_unchecked }}</a>
+    {% else %}<a class="btn btn-teal" href="{{ url_for('home_bp.home') }}">Back to Home</a>{% endif %}
+  </span>
+  {% else %}
+  <span class="muted">When every lesson matches the diary:</span>
+  <form method="post" action="{{ url_for('register_bp.check_week') }}">{{ back_fields() }}<input type="hidden" name="checked" value="1">
+    <button class="btn btn-teal btn-lg" type="submit">Week {{ week }} is done</button></form>
+  {% endif %}
+</div>
+{% endif %}
+<p class="mt-3 mb-0"><a class="on-glass" href="{{ url_for('lessons_bp.lessons') }}">List of all lessons</a></p>
+
+{% else %}
+{# ---------------- whole term ---------------- #}
+<p class="on-glass mb-2">Click a lesson to change it: ✓ had lesson → ✗ cancelled → $ missed but charged → back to ✓. Dashed boxes are weeks not checked yet.</p>
+<div class="grid-wrap">
+  <table class="reg-grid">
+    <thead><tr>
+      <th class="sticky" scope="col">Student</th>
+      {% for w in week_list %}<th scope="col" class="{{ 'checked' if w.checked }}">{{ 'Hol' if w.holidays else 'Wk ' ~ w.n }}{{ ' ✓' if w.checked }}<br>{{ fmt_dm(w.start) }}</th>{% endfor %}
+      <th scope="col">Charged</th><th scope="col">Amount</th>
+    </tr></thead>
+    <tbody>
+      {% for r in grid_rows %}
+      <tr>
+        <th class="sticky" scope="row">{{ r.name }}<small>{{ r.slot }}</small></th>
+        {% for w in week_list %}
+        {% set ls = r.cells.get(w.n, []) %}
+        <td>
+          {% if not ls %}<span class="text-muted">·</span>
+          {% elif ls|length > 1 %}<a class="cell many" href="{{ url_for('register_bp.register', term=term.id, week=w.n) }}" title="{{ ls|length }} lessons this week">{{ ls|length }}</a>
+          {% else %}{% set l = ls[0] %}
+            {% if l.status == 'holiday' %}<span class="cell st-holiday" title="Holiday">Hol</span>
+            {% else %}
+            <form method="post" action="{{ url_for('register_bp.cycle', lesson_id=l.id) }}" class="d-inline" data-cycle-form>
+              {{ back_fields() }}
+              <button type="submit" class="cell st-{{ l.status }}{{ '' if w.checked else ' unchecked' }}" aria-label="{{ r.name }}, {{ fmt_day(l.when) }}: {{ words[l.status] }}. Click to change.">{{ symbols[l.status] }}{% if l.kind == 'extra' %}<span class="plus">+</span>{% endif %}</button>
+            </form>
+            {% endif %}
+          {% endif %}
+        </td>
+        {% endfor %}
+        <td class="money">{{ r.count }}</td><td class="money">{{ r.cents|money }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="{{ week_list|length + 3 }}" class="text-center py-4">No lessons in this term yet.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr><th class="sticky" scope="row">Total</th>{% for w in week_list %}<td></td>{% endfor %}<td class="money">{{ grid_count }}</td><td class="money">{{ grid_cents|money }}</td></tr></tfoot>
+  </table>
+</div>
+<div class="legend on-glass">
+  <span>✓ had lesson</span><span>✗ cancelled, no charge</span><span>$ missed, still charged</span><span>Hol holiday</span><span>2 = two lessons that week (opens the week)</span><span>+ extra lesson</span>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block modals %}
+{% if term and view == 'week' %}
+<div class="modal fade" id="editLesson" tabindex="-1" aria-labelledby="editLessonTitle" aria-hidden="true">
+  <div class="modal-dialog">
+    <form method="post" id="editLessonForm" class="modal-content">
+      <input type="hidden" name="term" value="{{ term.id }}"><input type="hidden" name="week" value="{{ week }}"><input type="hidden" name="view" value="week">
+      <div class="modal-header"><h5 class="modal-title" id="editLessonTitle">Change lesson</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button></div>
+      <div class="modal-body">
+        <p id="editWho" class="fw-bold"></p>
+        <p id="editBilled" class="small" hidden></p>
+        <div class="row g-2">
+          <div class="col-6"><label class="form-label" for="e-date">Day</label><input type="date" id="e-date" name="date" class="form-control" required></div>
+          <div class="col-6"><label class="form-label" for="e-time">Time</label><input type="time" id="e-time" name="time" step="300" class="form-control" required></div>
+          <div class="col-6"><label class="form-label" for="e-minutes">Minutes</label><input type="number" id="e-minutes" name="minutes" min="5" max="240" class="form-control" required></div>
+          <div class="col-6"><label class="form-label" for="e-rate">$ per hour</label><input type="number" id="e-rate" name="rate" min="0" step="0.5" class="form-control" required></div>
+          <div class="col-12"><label class="form-label" for="e-note">Note</label><input type="text" id="e-note" name="note" class="form-control" placeholder="e.g. makeup for 16 Sep"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="submit" class="btn btn-danger me-auto" id="deleteLessonBtn" formnovalidate>Delete lesson</button>
+        <button type="button" class="btn btn-light-glass" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-teal">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // Fill the one edit dialog from the lesson whose pencil was pressed.
+  const modal = document.getElementById('editLesson');
+  if (modal) {
+    const editUrl = "{{ url_for('register_bp.edit_lesson', lesson_id=999999999) }}", deleteUrl = "{{ url_for('register_bp.delete_lesson', lesson_id=999999999) }}";
+    let deleting = false;
+    modal.addEventListener('show.bs.modal', (e) => {
+      const b = e.relatedTarget.dataset, form = document.getElementById('editLessonForm');
+      form.action = editUrl.replace('999999999', b.id);
+      document.getElementById('deleteLessonBtn').formAction = deleteUrl.replace('999999999', b.id);
+      document.getElementById('editWho').textContent = b.name + (b.kind === 'extra' ? ' (extra lesson)' : '');
+      const billed = document.getElementById('editBilled');
+      billed.textContent = b.billed ? b.billed + '. Changing it changes that invoice.' : '';
+      billed.hidden = !b.billed;
+      for (const k of ['date', 'time', 'minutes', 'rate', 'note']) document.getElementById('e-' + k).value = b[k];
+      deleting = false;
+    });
+    document.getElementById('deleteLessonBtn').addEventListener('click', (e) => {
+      if (!deleting) { e.preventDefault(); deleting = true; e.target.textContent = 'Press again to delete'; }
+    });
+  }
+
+  // Status buttons change the lesson in place, without reloading the page.
+  document.querySelectorAll('form[data-status-form]').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      const button = e.submitter;
+      if (!button) return;
+      e.preventDefault();
+      const data = new FormData(form); data.set('status', button.value);
+      try {
+        const r = await fetch(form.action, { method: 'POST', body: data, headers: { 'X-Requested-With': 'fetch' } });
+        const j = await r.json();
+        if (!j.ok) throw new Error();
+        form.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b.value === j.status)));
+      } catch (err) { form.submit(); }
+    });
+  });
+
+  // Whole term: a click moves a lesson to the next status in place.
+  document.querySelectorAll('form[data-cycle-form]').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const button = form.querySelector('button');
+      try {
+        const r = await fetch(form.action, { method: 'POST', body: new FormData(form), headers: { 'X-Requested-With': 'fetch' } });
+        const j = await r.json();
+        if (!j.ok) throw new Error();
+        button.className = button.className.replace(/st-\w+/, 'st-' + j.status);
+        const plus = button.querySelector('.plus');
+        button.textContent = j.symbol; if (plus) button.appendChild(plus);
+        button.setAttribute('aria-label', button.getAttribute('aria-label').replace(/: [^.]+\./, ': ' + j.words + '.'));
+      } catch (err) { form.submit(); }
+    });
+  });
+});
+</script>
+{% endblock %}

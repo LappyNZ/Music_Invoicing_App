@@ -66,6 +66,42 @@ It backs up first, downloads the newest image, restarts the app with it, waits u
 and prints the version it's running. After merging changes on GitHub, wait for the green tick on the
 repository's Actions tab (a few minutes) before updating. Otherwise there's nothing new to download yet.
 
+## First use of the term register (Term 3 2026)
+
+The update that brings in the register upgrades the database when it starts. Nothing is lost: Terms 3 and
+4 2026 are added, each student's regular lesson and rate is worked out from their recent lessons, lessons
+are linked to the old invoices that billed them, and the payments already recorded are kept. `update.sh`
+takes a backup first, as always.
+
+Then, on the app's **Home** page:
+
+1. **Check weeks 1 to 10 in the register.** Go through the diary a week at a time. Every lesson starts as
+   *Had lesson*: press *Cancelled* (no charge) or *Missed* (still charged) only where that's what happened,
+   use the pencil to change a lesson, and add extra or makeup lessons at the bottom. Then press
+   *Week 1 is done*, and so on. Lessons in the school holidays after the term show as a *Hol* week.
+2. **Make the Term 3 invoices.** The page lists who has lessons to invoice. Before pressing *Make*:
+   - If it says some lessons are **already on an older invoice**, open that invoice. If the family was
+     charged for them there, leave it. If that invoice was only for an earlier term, press *Bill them on
+     Term 3 2026 invoices*.
+   - **Add what's still owing from earlier invoices** lists older invoices that the app thinks are unpaid.
+     Leave it unticked unless every payment so far has been recorded in the app. You can add one later
+     (open the old invoice, *Move what's owing to the next invoice*).
+   - Students who share an email address can have **one invoice per family**.
+3. **Check the drafts.** Nothing has been emailed yet. Open one or two: add an item such as an exam fee
+   (or a minus amount for a discount), change the email for that family if you like, and press
+   **Email me a copy first** to see exactly what families get (it goes to the studio's own address).
+4. **Send.** On *Invoices*, press *Send N drafts*. A window shows each one going.
+5. **As payments arrive,** open the invoice and fill in *Amount received*. *Waiting for payment* (on Home and
+   Invoices) lists who hasn't paid.
+
+If the register changes after an invoice has gone (a lesson cancelled late, say), the invoice says so and
+offers **Correct and resend**. The corrected invoice keeps its number and says it replaces the earlier one.
+
+**Term 4 2026:** Home then offers *Get Term 4 2026 ready*. Check the days off (Labour Day and Show Day
+are ticked; untick a day you teach), everyone's regular lesson, and the rate for anyone paying less.
+Lessons already entered for Term 4 are kept as they are. If it offers to delete lessons entered after the
+last day, tick it when they're leftovers from *Weeks Repeating*. Nothing changes until you press *Start*.
+
 ## Rolling back to an earlier version
 
 Every published version also has a tag named after its commit, e.g. `sha-32d6a47`. The tags are listed on
@@ -92,6 +128,13 @@ while rolled back:
   Nothing is lost: it works again after updating.
 - Older versions don't know about **archived** students. They're offered for new lessons and invoices
   again, and Delete is the old one that hides a student's invoices. Don't delete students while rolled back.
+- Versions before the term register (`sha-105adcf` and earlier) still open everything, but:
+  - Their *Create* page doesn't know which lessons have been invoiced, cancelled or were holidays. Don't make
+    invoices with it for lessons already on a register invoice: they'd be charged twice.
+  - They can't send drafts made with the register (the PDF is only made when it's sent).
+  - Invoices that were moved to the next invoice, written off or are being corrected show as **Draft**
+    there, so don't bulk-send while rolled back.
+  - A payment recorded while rolled back isn't seen after updating again. Record it again.
 
 ## Connecting Gmail again
 
@@ -113,7 +156,7 @@ sending stops at the first invoice with "Gmail isn't connected", and nothing mor
 4. Copy the whole address from the browser's address bar, paste it into the terminal and press Enter.
    It should say "Gmail is connected".
 
-Then send the invoices that didn't go (set the list's Status filter to Draft to find them).
+Then send the rest: they're still drafts, so *Invoices* offers *Send N drafts* again.
 
 ## One-off: bringing back deleted students
 

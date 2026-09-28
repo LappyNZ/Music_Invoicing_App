@@ -6,15 +6,22 @@ Designed for simplicity, safety, and maintainability, with a clean UI and a Dock
 
 ## ✨ Features
 
-* Student management (name, email, parent, phone, school); students who stop are archived, keeping their history
-* Lesson tracking with filtering and repeat scheduling
-* Invoice generation (PDF via ReportLab), numbered like `INV26-0042` to fit a NZ bank payment reference
-* Email sending via the Gmail API (OAuth), one invoice at a time with a progress window
-* Invoice status tracking:
-  * Draft → Sent → Paid, with Void and Mark unpaid for corrections
-* NZ school term filtering
-* Persistent filters across actions
-* Safe development mode (email blocking)
+The app is organised around the school term:
+
+* **Home** says what to do next: check the register, make the invoices, send them, get the next term ready
+* **Register:** each term's lessons week by week (or the whole term as a grid). Every lesson starts as
+  *Had lesson*; mark only the ones that were *Cancelled* (no charge) or *Missed* (still charged), and add
+  extra or makeup lessons
+* **Start a term:** dates, days off (public holidays are suggested) and each student's regular lesson and
+  hourly rate, which fills the register for the whole term
+* **Invoices made from the register** in one go, one per student or per family, kept line by line.
+  Add items (exam fees, discounts), change the email wording for one invoice, email yourself a copy first,
+  then send them all with a progress window
+* PDFs with the logo, "Prompt payment is appreciated", and the payment Reference (`INV26-0042`) and Particulars
+* **After sending:** payments (part or full), *Correct and resend* (the invoice keeps its number and is
+  marked as corrected), move what's owing to the next invoice, write off, void, and undo
+* Students who stop are archived, keeping their history
+* Email via the Gmail API (OAuth), with a safe development mode that blocks or redirects email
 * Docker-based dev and production environments
 
 ## 🏗️ Project Structure
@@ -25,11 +32,15 @@ music-invoice/
 │  ├─ config.py           # Central config (env-driven)
 │  ├─ db.py               # DB connection, set-up and upgrades
 │  ├─ gmail_auth.py       # Connects the app to Gmail (python -m gmail_auth)
-│  ├─ utils.py            # Shared helpers
+│  ├─ terms.py            # Terms, weeks and which lessons fall in them
+│  ├─ billing.py          # Invoices from the register: drafts, lines, sending, payments, corrections
+│  ├─ utils.py            # Shared helpers (money in cents, dates)
 │  ├─ routes/             # Blueprints
+│  │  ├─ home.py          # Home: the next step
+│  │  ├─ register.py      # Register and Start a term
+│  │  ├─ invoices.py
 │  │  ├─ students.py
-│  │  ├─ lessons.py
-│  │  └─ invoices.py
+│  │  └─ lessons.py       # List of all lessons
 │  ├─ services/           # Business logic
 │  │  ├─ email_service.py
 │  │  ├─ invoice_service.py
@@ -87,9 +98,14 @@ GOOGLE_OAUTH_TOKEN=/secrets/token.json
 # Only appears in the address Google sends the browser back to when connecting Gmail
 OAUTH_PORT=8090
 
+# Pretend it's another day (e.g. TODAY=2026-09-28) for a demonstration; leave empty
+TODAY=
+
 # Business details (used in invoices)
 SENDER_EMAIL=your-email@example.com
 SENDER_NAME=Your Name
+# Printed on the PDF next to the logo; leave empty to show just the logo
+BUSINESS_NAME=
 BUSINESS_ADDRESS_LINE1=123 Example Street
 BUSINESS_ADDRESS_LINE2=Example City
 BUSINESS_PHONE=000 000 0000
@@ -110,7 +126,7 @@ Stop
 
 docker compose -f docker/docker-compose.dev.yml down
 
-Sample data (made-up students, lessons and invoices; replaces what's in data-dev/)
+Sample data (made-up students and a finished Term 3 2026 with its invoices; replaces what's in data-dev/)
 
 python scripts/reset_dev_db.py
 
@@ -205,9 +221,9 @@ Only .env.example is tracked.
 
 See [docs/review-and-roadmap.md](docs/review-and-roadmap.md) for the full plan. In short:
 
-* Improved invoice preview UX
-* Better payment reconciliation tools
-* Multi-teacher support
+* Instruments and rentals
+* Importing the bank statement to tick off payments
+* Card payments
 
 ## ⚠️ Disclaimer
 

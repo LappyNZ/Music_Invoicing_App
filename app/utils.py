@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 
 def new_invoice_number(invoice_id: int) -> str:
@@ -76,3 +77,56 @@ def utc_to_local(s: str) -> str:
     except (TypeError, ValueError):
         return s
     return when.strftime(DATETIME_FORMAT)
+
+# ---- Money and dates as the term workflow shows them ----
+MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September",
+               "October", "November", "December"]
+
+
+def money(cents) -> str:
+    """$1,234.50 (and −$20.00 for a discount)."""
+    cents = int(cents or 0)
+    return ("−$" if cents < 0 else "$") + f"{abs(cents) / 100:,.2f}"
+
+
+def to_cents(text):
+    """Cents from what someone typed ("1,200", "$45.5", "-20"), or None if it isn't a sensible amount."""
+    cleaned = str(text or "").replace("$", "").replace(",", "").replace("−", "-").strip()
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation:
+        return None
+    if not value.is_finite():
+        return None
+    return int(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100)
+
+
+def lesson_cents(minutes, rate_per_hour) -> int:
+    """What a lesson costs, rounded to the cent the way people round (half up)."""
+    exact = Decimal(str(minutes)) * Decimal(str(rate_per_hour)) / 60
+    return int(exact.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP) * 100)
+
+
+def fmt_day(d) -> str:
+    return f"{DAYS[d.weekday()]} {d.day} {MONTHS[d.month - 1]}"          # Mon 20 Jul
+
+
+def fmt_dm(d) -> str:
+    return f"{d.day} {MONTHS[d.month - 1]}"                               # 20 Jul
+
+
+def fmt_long(d) -> str:
+    return f"{DAY_NAMES[d.weekday()]} {d.day} {MONTH_NAMES[d.month - 1]}"   # Monday 20 July
+
+
+def fmt_full(d) -> str:
+    return f"{d.day} {MONTH_NAMES[d.month - 1]} {d.year}"                 # 20 July 2026
+
+
+def fmt_clock(t) -> str:
+    """3:30 pm, from a time or datetime."""
+    hour = t.hour % 12 or 12
+    return f"{hour}:{t.minute:02d} {'pm' if t.hour >= 12 else 'am'}"

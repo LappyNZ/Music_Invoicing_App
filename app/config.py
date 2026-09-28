@@ -33,6 +33,7 @@ class BaseConfig:
     EMAIL_ENABLED = as_bool(os.getenv("EMAIL_ENABLED"), True)
     EMAIL_REDIRECT_TO = os.getenv("EMAIL_REDIRECT_TO", "")
     SAFE_MODE = as_bool(os.getenv("SAFE_MODE"), False)
+    TODAY = os.getenv("TODAY", "")  # pin "today" (e.g. 2026-09-28) for a demonstration; leave empty
 
     STATIC_DIR = "static"
     LOGO_FILE = "logo_Small.png"

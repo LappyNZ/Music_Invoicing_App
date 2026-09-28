@@ -1,10 +1,13 @@
-from flask import Flask, render_template
+from flask import Flask
 from config import get_config
 from db import init_db
-from utils import fmt_date, invoice_number_of, parse_date_any, nz_school_term, utc_to_local
-from routes.students import students_bp
-from routes.lessons import lessons_bp
+import terms
+from utils import fmt_date, fmt_day, fmt_dm, fmt_full, fmt_long, invoice_number_of, money, parse_date_any, nz_school_term, utc_to_local
+from routes.home import home_bp
 from routes.invoices import invoices_bp
+from routes.lessons import lessons_bp
+from routes.register import register_bp
+from routes.students import students_bp
 import os
 
 
@@ -18,9 +21,11 @@ app.secret_key = app.config["SECRET_KEY"]
 os.makedirs(os.path.dirname(app.config["DB_PATH"]), exist_ok=True)
 os.makedirs(app.config["INVOICE_PDF_DIR"], exist_ok=True)
 
+app.register_blueprint(home_bp)
+app.register_blueprint(register_bp)
+app.register_blueprint(invoices_bp)
 app.register_blueprint(students_bp)
 app.register_blueprint(lessons_bp)
-app.register_blueprint(invoices_bp)
 
 # Create or upgrade the database. start.sh also imports this module once before gunicorn starts.
 with app.app_context():
@@ -34,6 +39,10 @@ app.jinja_env.globals["parse_date_any"] = parse_date_any
 app.jinja_env.globals["nz_school_term"] = nz_school_term
 app.jinja_env.globals["invoice_number_of"] = invoice_number_of
 app.jinja_env.filters["local_time"] = utc_to_local
+app.jinja_env.filters["money"] = money
+app.jinja_env.filters["todate"] = terms.day
+for helper in (fmt_day, fmt_dm, fmt_full, fmt_long):
+    app.jinja_env.globals[helper.__name__] = helper
 
 
 @app.context_processor
@@ -49,11 +58,6 @@ def health():
 @app.route("/version")
 def version():
     return {"version": app.config["APP_VERSION"]}
-
-
-@app.route("/")
-def index():
-    return render_template("index.html")
 
 
 if __name__ == "__main__":

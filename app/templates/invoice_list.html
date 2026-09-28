@@ -1,573 +1,162 @@
 {% extends "base.html" %}
 {% block content %}
-<h2>Send Invoices</h2>
-
-<!-- Filters -->
-<form method="GET" class="row g-3 mb-4">
-  <div class="col-md-3">
-    <label class="form-label">Student</label>
-    <select name="student_id" class="form-select">
-      <option value="">All students</option>
-      {% for s in student_options %}
-        <option value="{{ s.id }}" {% if selected_student == s.id|string %}selected{% endif %}>
-          {{ s.name }}{{ ' (archived)' if not s.active }}
-        </option>
-      {% endfor %}
-    </select>
+<div class="page-head">
+  <div>
+    <p class="eyebrow on-glass mb-1">Money</p>
+    <h2 class="page-title">Invoices</h2>
   </div>
-
-  <div class="col-md-2">
-    <label class="form-label">Start Date</label>
-    <input type="date" name="start_date" value="{{ start_date or '' }}" class="form-control">
+  <div class="tools">
+    <form method="get" class="d-flex align-items-center gap-2">
+      <label for="term-pick" class="visually-hidden">Show the invoices of</label>
+      <select id="term-pick" name="term" class="form-select form-select-sm" onchange="this.form.submit()">
+        {% if show != 'term' %}<option value="" selected disabled>a term…</option>{% endif %}
+        {% for t in terms %}<option value="{{ t.id }}"{{ ' selected' if show == 'term' and term and t.id == term.id }}>{{ t.name }}</option>{% endfor %}
+      </select>
+    </form>
+    <a class="btn btn-sm {{ 'btn-teal' if show == 'unpaid' else 'btn-light-glass' }}" href="{{ url_for('invoices_bp.invoice_list', show='unpaid') }}">Waiting for payment</a>
+    <a class="btn btn-sm {{ 'btn-teal' if show == 'all' else 'btn-light-glass' }}" href="{{ url_for('invoices_bp.invoice_list', show='all') }}">All</a>
   </div>
+</div>
 
-  <div class="col-md-2">
-    <label class="form-label">End Date</label>
-    <input type="date" name="end_date" value="{{ end_date or '' }}" class="form-control">
-  </div>
-  
-  <div class="col-md-2">
-    <label class="form-label">Term</label>
-    <select name="term" class="form-select">
-      <option value="" {{ 'selected' if not term else '' }}>All</option>
-      <option value="T1" {{ 'selected' if term == 'T1' else '' }}>Term 1 (Jan–Mar)</option>
-      <option value="T2" {{ 'selected' if term == 'T2' else '' }}>Term 2 (Apr–Jun)</option>
-      <option value="T3" {{ 'selected' if term == 'T3' else '' }}>Term 3 (Jul–Sep)</option>
-      <option value="T4" {{ 'selected' if term == 'T4' else '' }}>Term 4 (Oct–Dec)</option>
-    </select>
-  </div>
-
-  <div class="col-md-2">
-    <label class="form-label">Year</label>
-    <select name="year" class="form-select">
-      <option value="" {{ 'selected' if not year else '' }}>All</option>
-      {% for y in year_options %}
-        <option value="{{ y }}" {{ 'selected' if year == y else '' }}>{{ y }}</option>
-      {% endfor %}
-    </select>
-  </div>
-
-  <div class="col-md-3">
-     <label class="form-label">Status</label>
-     <select name="status" class="form-select">
-       <option value="" {% if not status %}selected{% endif %}>All</option>
-       <option value="draft" {% if status == 'draft' %}selected{% endif %}>Draft (not sent)</option>
-       <option value="sent"  {% if status == 'sent' %}selected{% endif %}>Sent</option>
-       <option value="paid"  {% if status == 'paid' %}selected{% endif %}>Paid</option>
-       <option value="void"  {% if status == 'void' %}selected{% endif %}>Void</option>
-     </select>
-   </div>
-
-  <div class="col-md-2 d-flex align-items-end">
-    <button type="submit" class="btn btn-primary w-100">Filter</button>
-  </div>
-</form>
-
-<!-- Bulk send form. Nothing inside it may be another <form>: browsers drop nested forms.
-     Row actions use the separate forms after it, via the button's form="..." attribute. -->
-<form method="POST" id="bulk-send-form">
-  <input type="hidden" name="action" value="send">
-
-  <div class="d-flex justify-content-between align-items-center mb-2">
-    <div class="d-flex align-items-center gap-3">
-      <div class="form-check m-0">
-        <input class="form-check-input" type="checkbox" id="select-all">
-        <label class="form-check-label" for="select-all">Select all</label>
-      </div>
-      <div class="text-muted">
-        Selected: <span id="selected-count">0</span>
-      </div>
-    </div>
-    <button type="submit" id="send-btn" class="btn btn-success" name="confirm_send" value="1">
-      Send Selected Invoices
-    </button>
-  </div>
-
-  <div class="table-responsive">
-    <table class="table table-striped table-bordered align-middle" id="invoice-table">
-      <thead class="table-dark">
-        <tr>
-          <th style="width:40px;"></th>
-          <th>Invoice No.</th>
-          <th>Student</th>
-          <th>Parent</th>
-          <th>Period</th>
-          <th class="text-end">Total</th>
-          <th>Status</th>
-          <th class="text-center">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for inv in invoices %}
-        {% set invoice_number = invoice_number_of(inv) %}
-        {% set st = (inv.status or ('sent' if inv.emailed_at else 'draft')) %}
-        <tr class="{{ 'text-muted' if st == 'void' }}">
-          <!-- Select (paid and void invoices can't be emailed) -->
-          <td class="text-center">
-            <input type="checkbox" name="invoice_id" value="{{ inv.id }}" class="row-check"
-                   data-total="{{ '%.2f'|format(inv.total or 0) }}" data-sent="{{ 1 if st == 'sent' else 0 }}"
-                   data-number="{{ invoice_number }}"
-                   {% if st in ('paid', 'void') %}disabled title="{{ st|capitalize }} invoices can't be emailed"{% endif %}>
-          </td>
-
-          <!-- Invoice No. -->
-          <td title="{{ invoice_number }}">{{ invoice_number }}</td>
-
-          <!-- Student / Parent -->
-          <td>{{ inv.student_name }}</td>
-          <td class="text-truncate" style="max-width: 220px;">{{ inv.parent_name or "—" }}</td>
-
-          <!-- Period -->
-          <td>
-            {{ fmt_date(inv.start_date) if inv.start_date else '' }}
-            →
-            {{ fmt_date(inv.end_date) if inv.end_date else '' }}
-          </td>
-
-          <!-- Total -->
-          <td class="text-end{{ ' text-decoration-line-through' if st == 'void' }}">${{ "%.2f"|format(inv.total or 0) }}</td>
-
-          <!-- Status (compact badge with tooltip; includes Created) -->
-          <td class="align-middle">
-            {% set tt_lines = [] %}
-            {% if inv.created_at %}{% set _ = tt_lines.append('Created: ' ~ (inv.created_at|local_time)) %}{% endif %}
-            {% if st == 'paid' %}
-              {% if inv.paid_at %}{% set _ = tt_lines.append('Paid: ' ~ inv.paid_at) %}{% endif %}
-              {% if inv.paid_amount is not none %}{% set _ = tt_lines.append('Amount: $' ~ ("%.2f"|format(inv.paid_amount))) %}{% endif %}
-              {% if inv.paid_ref %}{% set _ = tt_lines.append('Ref: ' ~ inv.paid_ref) %}{% endif %}
-              {% if inv.emailed_at %}{% set _ = tt_lines.append('Sent: ' ~ inv.emailed_at) %}{% endif %}
-              {% if inv.emailed_to %}{% set _ = tt_lines.append('To: ' ~ inv.emailed_to) %}{% endif %}
-              {% set badge_class = 'bg-success' %}
-              {% set icon = 'bi-check-circle' %}
-              {% set label = 'Paid' %}
-            {% elif st == 'sent' %}
-              {% if inv.emailed_at %}{% set _ = tt_lines.append('Sent: ' ~ inv.emailed_at) %}{% endif %}
-              {% if inv.emailed_to %}{% set _ = tt_lines.append('To: ' ~ inv.emailed_to) %}{% endif %}
-              {% set badge_class = 'bg-info text-dark' %}
-              {% set icon = 'bi-envelope-check' %}
-              {% set label = 'Sent' %}
-            {% elif st == 'void' %}
-              {% if inv.voided_at %}{% set _ = tt_lines.append('Voided: ' ~ inv.voided_at) %}{% endif %}
-              {% if inv.void_reason %}{% set _ = tt_lines.append('Reason: ' ~ inv.void_reason) %}{% endif %}
-              {% if inv.emailed_at %}{% set _ = tt_lines.append('Sent: ' ~ inv.emailed_at) %}{% endif %}
-              {% set badge_class = 'bg-dark' %}
-              {% set icon = 'bi-x-circle' %}
-              {% set label = 'Void' %}
-            {% else %}
-              {% set _ = tt_lines.append('Not emailed yet') %}
-              {% set badge_class = 'bg-secondary' %}
-              {% set icon = 'bi-dash-circle' %}
-              {% set label = 'Draft' %}
-            {% endif %}
-
-            <span class="badge {{ badge_class }} d-inline-flex align-items-center gap-1"
-                  data-bs-toggle="tooltip"
-                  data-bs-placement="top"
-                  title="{{ tt_lines|join(' • ') }}">
-              <i class="bi {{ icon }}"></i> {{ label }}
-            </span>
-          </td>
-
-          <!-- Actions -->
-          <td class="text-center align-middle">
-            <div class="dropdown">
-              <!-- "fixed" stops the table clipping the menu on the last rows -->
-              <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false"
-                      data-bs-popper-config='{"strategy":"fixed"}'>
-                ⋯
-              </button>
-              <ul class="dropdown-menu dropdown-menu-end">
-                <li>
-                  <a class="dropdown-item" target="_blank" rel="noopener"
-                    href="{{ url_for('invoices_bp.regenerate_invoice_pdf', invoice_id=inv.id) }}">
-                    <i class="bi bi-file-earmark-pdf me-2"></i>View PDF
-                  </a>
-                </li>
-
-                {% if st not in ('paid', 'void') %}
-                <li><hr class="dropdown-divider"></li>
-                <li>
-                  <button type="button" class="dropdown-item"
-                          data-bs-toggle="modal"
-                          data-bs-target="#markPaidModal"
-                          data-invoice-id="{{ inv.id }}"
-                          data-return-student="{{ selected_student or '' }}"
-                          data-return-start="{{ start_date or '' }}"
-                          data-return-end="{{ end_date or '' }}"
-                          data-return-status="{{ status or '' }}"
-                          data-return-term="{{ term or '' }}"
-                          data-return-year="{{ year or '' }}">
-                    <i class="bi bi-cash-coin me-2"></i>Mark paid…
-                  </button>
-                </li>
-                {% if st == 'draft' %}
-                <li>
-                  <button type="submit" form="mark-sent-{{ inv.id }}" class="dropdown-item">
-                    <i class="bi bi-send-check me-2"></i>Mark sent
-                  </button>
-                </li>
-                {% endif %}
-                <li>
-                  <button type="button" class="dropdown-item text-danger"
-                          data-bs-toggle="modal"
-                          data-bs-target="#voidModal"
-                          data-invoice-id="{{ inv.id }}"
-                          data-invoice-number="{{ invoice_number }}"
-                          data-return-student="{{ selected_student or '' }}"
-                          data-return-start="{{ start_date or '' }}"
-                          data-return-end="{{ end_date or '' }}"
-                          data-return-status="{{ status or '' }}"
-                          data-return-term="{{ term or '' }}"
-                          data-return-year="{{ year or '' }}">
-                    <i class="bi bi-x-circle me-2"></i>Void…
-                  </button>
-                </li>
-                {% endif %}
-
-                {% if st == 'void' %}
-                <li><hr class="dropdown-divider"></li>
-                <li>
-                  <button type="submit" form="restore-{{ inv.id }}" class="dropdown-item">
-                    <i class="bi bi-arrow-counterclockwise me-2"></i>Restore
-                  </button>
-                </li>
-                {% endif %}
-
-                {% if st == 'paid' %}
-                <li><hr class="dropdown-divider"></li>
-                <li>
-                  <button type="submit" form="unpaid-{{ inv.id }}" class="dropdown-item">
-                    <i class="bi bi-arrow-counterclockwise me-2"></i>Mark unpaid
-                  </button>
-                </li>
-                {% endif %}
-              </ul>
-            </div>
-          </td>
-        </tr>
-        {% endfor %}
-
-        {% if invoices|length == 0 %}
-        <tr>
-          <td colspan="8" class="text-center text-muted">No invoices in this range.</td>
-        </tr>
-        {% endif %}
-      </tbody>
-    </table>
-  </div>
-</form>
-
-<!-- Row action forms, submitted by the "Mark sent", "Restore" and "Mark unpaid" buttons in each row's menu -->
-{% macro return_fields() -%}
-  <input type="hidden" name="return_student_id" value="{{ selected_student or '' }}">
-  <input type="hidden" name="return_start_date" value="{{ start_date or '' }}">
-  <input type="hidden" name="return_end_date" value="{{ end_date or '' }}">
-  <input type="hidden" name="return_status" value="{{ status or '' }}">
-  <input type="hidden" name="return_term" value="{{ term or '' }}">
-  <input type="hidden" name="return_year" value="{{ year or '' }}">
-{%- endmacro %}
-{% for inv in invoices %}
-{% set st = (inv.status or ('sent' if inv.emailed_at else 'draft')) %}
-{% if st == 'draft' %}
-<form id="mark-sent-{{ inv.id }}" method="POST" action="{{ url_for('invoices_bp.update_invoice_status', invoice_id=inv.id) }}" hidden>
-  <input type="hidden" name="status" value="sent">
-  {{ return_fields() }}
-</form>
-{% elif st == 'void' %}
-<form id="restore-{{ inv.id }}" method="POST" action="{{ url_for('invoices_bp.restore_invoice', invoice_id=inv.id) }}" hidden>
-  {{ return_fields() }}
-</form>
-{% elif st == 'paid' %}
-<form id="unpaid-{{ inv.id }}" method="POST" action="{{ url_for('invoices_bp.mark_unpaid', invoice_id=inv.id) }}" hidden
-      data-number="{{ invoice_number_of(inv) }}"
-      onsubmit="return confirm('Remove the payment recorded for ' + this.dataset.number + '? It goes back to Sent (or Draft if it was never emailed).')">
-  {{ return_fields() }}
-</form>
+{% if show == 'term' and term %}
+<section class="panel mb-3 d-flex flex-wrap gap-3 align-items-center">
+  <div><div class="muted small">{{ term.name }}: invoiced</div><b class="fs-5">{{ invoiced|money }}</b></div>
+  <div><div class="muted small">Paid so far</div><b class="fs-5">{{ paid|money }}</b></div>
+  <div><div class="muted small">Still to come</div><b class="fs-5">{{ owing|money }}</b></div>
+  <span class="ms-auto d-flex flex-wrap gap-2">
+    {% if unbilled %}<a class="btn btn-teal" href="{{ url_for('invoices_bp.make_invoices', term=term.id) }}">{{ 'Make' if not rows else 'Make more' }} {{ term.name }} invoices ({{ unbilled|length }})</a>{% endif %}
+    {% if drafts %}<button type="button" class="btn btn-teal" id="send-drafts" data-ids="{{ drafts|map(attribute='id')|join(',') }}"
+      data-total="{{ drafts|sum(attribute='total') }}">Send {{ drafts|length }} draft{{ 's' if drafts|length != 1 }}</button>{% endif %}
+  </span>
+</section>
+{% elif show == 'student' %}
+<section class="panel mb-3"><b class="fs-5">{{ student.name if student else 'Deleted student #' ~ student_id }}</b>
+  <span class="muted">: every invoice with their lessons on it, newest first.</span></section>
+{% elif show == 'unpaid' %}
+<section class="panel mb-3"><b class="fs-5">{{ owing|money }}</b> <span class="muted">still to come from {{ rows|length }} invoice{{ 's' if rows|length != 1 }}.
+  Later (Phase 4), importing the bank statement will tick these off by their reference.</span></section>
 {% endif %}
-{% endfor %}
 
-<!-- script to wire up tooltips + modal target -->
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-  // Enable Bootstrap 5 tooltips
-  const tipTrigger = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
-  tipTrigger.forEach(el => new bootstrap.Tooltip(el));
+{% if rows %}
+<div class="table-responsive">
+<table class="table inv-table mb-0">
+  <thead><tr><th>Invoice</th><th>For</th><th>To</th>{% if show != 'term' %}<th>Term</th>{% endif %}<th class="text-end">Total</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for r in rows %}
+    <tr class="clickable" data-href="{{ url_for('invoices_bp.invoice', invoice_id=r.id) }}">
+      <td class="num"><a href="{{ url_for('invoices_bp.invoice', invoice_id=r.id) }}">{{ r.number }}</a></td>
+      <td>{{ r.names }}{% if r.extras %} <span class="chip chip-extra" title="Extra lessons and added items">Extras {{ r.extras|money }}</span>{% endif %}</td>
+      <td>{{ r.bill_to }}</td>
+      {% if show != 'term' %}<td>{{ r.term }}</td>{% endif %}
+      <td class="text-end num">{{ r.total|money }}{% if r.state in ('part', 'unpaid') and r.paid %}<br><small class="text-muted">{{ r.owing|money }} to pay</small>{% endif %}</td>
+      <td><span class="chip chip-{{ r.tone or 'plain' }}">{{ r.label }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% elif show == 'term' %}
+<div class="panel text-center py-4">
+  {% if unbilled %}
+  <h3>No {{ term.name }} invoices yet</h3>
+  <p class="muted mx-auto" style="max-width: 56ch">They’re all made from the register in one go: every lesson that happened or is charged, extra lessons and anything you add.
+    Nothing is emailed until you say so.</p>
+  <a class="btn btn-teal btn-lg" href="{{ url_for('invoices_bp.make_invoices', term=term.id) }}">Make {{ term.name }} invoices</a>
+  {% else %}
+  <p class="mb-0">No invoices for {{ term.name }}.</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="panel">Nothing here.</div>
+{% endif %}
 
-  // Fill Mark Paid modal action & hidden fields
-  const markPaidModal = document.getElementById('markPaidModal');
-  if (markPaidModal) {
-    markPaidModal.addEventListener('show.bs.modal', function (event) {
-      const btn = event.relatedTarget;
-      const id = btn.getAttribute('data-invoice-id');
-      const form = document.getElementById('markPaidForm');
-      form.action = "{{ url_for('invoices_bp.update_invoice_status', invoice_id=0) }}".replace('0', id);
-
-      // persist filters
-      document.getElementById('retStudent').value = btn.getAttribute('data-return-student') || '';
-      document.getElementById('retStart').value   = btn.getAttribute('data-return-start') || '';
-      document.getElementById('retEnd').value     = btn.getAttribute('data-return-end') || '';
-      document.getElementById('retStatus').value  = btn.getAttribute('data-return-status') || '';
-      document.getElementById('retTerm').value    = btn.getAttribute('data-return-term') || '';
-      document.getElementById('retYear').value    = btn.getAttribute('data-return-year') || '';
-    });
-  }
-
-  // Fill Void modal action & hidden fields
-  const voidModal = document.getElementById('voidModal');
-  if (voidModal) {
-    voidModal.addEventListener('show.bs.modal', function (event) {
-      const btn = event.relatedTarget;
-      document.getElementById('voidForm').action =
-        "{{ url_for('invoices_bp.void_invoice', invoice_id=0) }}".replace(/0$/, btn.getAttribute('data-invoice-id'));
-      document.getElementById('voidNumber').textContent = btn.getAttribute('data-invoice-number') || '';
-      document.getElementById('voidReason').value = '';
-      for (const key of ['student', 'start', 'end', 'status', 'term', 'year']) {
-        document.getElementById('void-return-' + key).value = btn.getAttribute('data-return-' + key) || '';
-      }
-    });
-  }
-});
-</script>
-
-<!-- Small helper script for select all / counts / disable send -->
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-  const selectAll = document.getElementById("select-all");
-  const checks = Array.from(document.querySelectorAll(".row-check:not(:disabled)"));
-  const selectedCount = document.getElementById("selected-count");
-  const sendBtn = document.getElementById("send-btn");
-
-  function updateSelectAllVisual() {
-    if (!selectAll) return;
-    const total = checks.length;
-    const checked = checks.filter(c => c.checked).length;
-    selectAll.checked = checked === total && total > 0;
-    selectAll.indeterminate = checked > 0 && checked < total;
-  }
-
-  function updateCountAndButton() {
-    const count = checks.filter(c => c.checked).length;
-    selectedCount.textContent = count;
-    sendBtn.disabled = (count === 0);
-    updateSelectAllVisual();
-  }
-
-  // Initialize: compute count + visual state
-  updateCountAndButton();
-
-  // Select-all toggles all
-  if (selectAll) {
-    selectAll.addEventListener("change", () => {
-      checks.forEach(c => c.checked = selectAll.checked);
-      updateCountAndButton();
-    });
-  }
-
-  // Individual checkboxes update the count and maybe select-all state
-  checks.forEach(c => {
-    c.addEventListener("change", () => {
-      updateCountAndButton();
-    });
-  });
-
-  // Confirm before emailing, saying how many, how much, and whether any go out a second time.
-  // Once confirmed, further clicks are ignored so nobody gets the same email twice.
-  // (Without JavaScript the form still works, sending them all in one go.)
-  let sending = false;
-  document.getElementById("bulk-send-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    if (sending) return;
-    const chosen = checks.filter(c => c.checked);
-    const total = chosen.reduce((sum, c) => sum + parseFloat(c.dataset.total || 0), 0);
-    const again = chosen.filter(c => c.dataset.sent === "1").length;
-    let message = `Email ${chosen.length} invoice${chosen.length === 1 ? "" : "s"} totalling $${total.toFixed(2)}?`;
-    if (again) {
-      message += `\n\n${again} of them ${again === 1 ? "has" : "have"} already been sent and will be emailed again.`;
-    }
-    if (!confirm(message)) return;
-    sending = true;
-    sendBtn.disabled = true;
-    sendBtn.textContent = "Sending…";
-    sendInTurn(chosen);
-  });
-
-  // Send the invoices one request at a time, showing progress, and stop if Gmail isn't connected.
-  async function sendInTurn(chosen) {
-    const modalEl = document.getElementById("sendProgressModal");
-    const text = document.getElementById("sendProgressText");
-    const bar = document.getElementById("sendProgressBar");
-    const log = document.getElementById("sendProgressLog");
-    const stop = document.getElementById("sendProgressStop");
-    const done = document.getElementById("sendProgressDone");
-    const counts = { sent: 0, notSent: 0, failed: 0 };
-    const warnOnLeave = (e) => { e.preventDefault(); e.returnValue = ""; };
-    window.addEventListener("beforeunload", warnOnLeave);
-    bootstrap.Modal.getOrCreateInstance(modalEl).show();
-
-    function addLine(symbol, message, className) {
-      const li = document.createElement("li");
-      li.className = className;
-      li.textContent = `${symbol} ${message}`;
-      log.appendChild(li);
-    }
-
-    let stopped = "";
-    for (let i = 0; i < chosen.length; i++) {
-      text.textContent = `Sending ${i + 1} of ${chosen.length}…`;
-      const url = "{{ url_for('invoices_bp.send_one_invoice', invoice_id=0) }}".replace(/0$/, chosen[i].value);
-      let response, result;
-      try {
-        response = await fetch(url, { method: "POST" });
-      } catch (err) {
-        stopped = "The app couldn't be reached, so sending stopped. Check which invoices show as Sent before sending the rest.";
-        break;
-      }
-      try {
-        result = await response.json();
-      } catch (err) {
-        result = { status: "failed", message: `${chosen[i].dataset.number}: the app hit an error (${response.status}).` };
-      }
-      if (result.status === "gmail_not_connected") { stopped = result.message; break; }
-      if (result.status === "sent") { counts.sent++; addLine("✓", result.message, ""); }
-      else if (result.status === "failed") { counts.failed++; addLine("✗", result.message, "fw-semibold"); }
-      else { counts.notSent++; addLine("–", result.message, ""); }
-      bar.style.width = `${Math.round((i + 1) / chosen.length * 100)}%`;
-    }
-
-    window.removeEventListener("beforeunload", warnOnLeave);
-    const summary = `Emailed: ${counts.sent}, Not sent: ${counts.notSent}, Failed: ${counts.failed}`;
-    if (stopped) {
-      text.textContent = `Stopped. ${summary}`;
-      stop.textContent = stopped;
-      stop.classList.remove("d-none");
-      bar.classList.add("bg-danger");
-    } else {
-      text.textContent = `Finished. ${summary}`;
-      bar.classList.add(counts.failed ? "bg-warning" : "bg-success");
-    }
-    done.disabled = false;
-    done.focus();
-  }
-
-  // Closing the progress window reloads the list, so the statuses are up to date.
-  document.getElementById("sendProgressDone").addEventListener("click", () => location.reload());
-
-  // Coming back with the Back button can restore the page as it was left: re-enable it.
-  window.addEventListener("pageshow", () => {
-    sending = false;
-    sendBtn.textContent = "Send Selected Invoices";
-    updateCountAndButton();
-  });
-
-  // Prevent accidental form submit when opening modals from within the table
-  document.querySelectorAll('.dropdown-item[data-bs-toggle="modal"]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      // Close any open dropdown menus first (smooth UX)
-      document.querySelectorAll('.dropdown-menu.show').forEach(menu => {
-        const toggle = menu.closest('.dropdown')?.querySelector('[data-bs-toggle="dropdown"]');
-        if (toggle) bootstrap.Dropdown.getOrCreateInstance(toggle).hide();
-      });
-
-      const target = el.getAttribute('data-bs-target');
-      if (target) {
-        // Delay a tick so dropdown can finish hiding before showing modal
-        setTimeout(() => {
-          const modalEl = document.querySelector(target);
-          if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show(el);
-        }, 0);
-      }
-    });
-  });
-});
-</script>
+<details class="panel mt-3">
+  <summary class="fw-bold" style="cursor:pointer">A one-off invoice (e.g. an exam fee on its own)</summary>
+  <form method="post" action="{{ url_for('invoices_bp.one_off') }}" class="row g-2 mt-2 align-items-end">
+    <input type="hidden" name="term" value="{{ term.id if term else '' }}">
+    <div class="col-md-6"><label class="form-label" for="oo-student">Student</label>
+      <select id="oo-student" name="student_id" class="form-select" required><option value="">Choose…</option>
+        {% for s in students %}<option value="{{ s.id }}">{{ s.name }}</option>{% endfor %}</select></div>
+    <div class="col-md-3"><button class="btn btn-teal w-100" type="submit">Start it</button></div>
+  </form>
+</details>
 {% endblock %}
 
 {% block modals %}
-<div class="modal fade" id="sendProgressModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false"
-     aria-labelledby="sendProgressLabel" aria-hidden="true">
+<div class="modal fade" id="sendModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false" aria-labelledby="sendTitle" aria-hidden="true">
   <div class="modal-dialog modal-dialog-scrollable">
     <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title" id="sendProgressLabel">Sending invoices</h5>
-      </div>
+      <div class="modal-header"><h5 class="modal-title" id="sendTitle">Send the drafts</h5></div>
       <div class="modal-body">
-        <p id="sendProgressText" class="mb-2" aria-live="polite">Starting…</p>
-        <div class="progress mb-3" role="progressbar" aria-label="Sending progress">
-          <div class="progress-bar" id="sendProgressBar" style="width: 0%"></div>
+        <div id="sendAsk">
+          <p class="fs-5 mb-2" id="sendQuestion"></p>
+          <p class="mb-0">Tip: open one first and use <b>Email me a copy</b> to see exactly what families get.</p>
         </div>
-        <div class="alert alert-danger d-none" id="sendProgressStop"></div>
-        <ul class="list-unstyled small mb-0" id="sendProgressLog"></ul>
+        <div id="sendProgress" hidden>
+          <p id="sendText" aria-live="polite">Starting…</p>
+          <div class="progress progress-send" role="progressbar" aria-label="Sending progress"><div class="progress-bar bg-success" id="sendBar" style="width:0%"></div></div>
+          <div class="alert alert-danger mt-3" id="sendStop" hidden></div>
+          <ul class="send-log" id="sendLog"></ul>
+        </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-primary" id="sendProgressDone" disabled>Close</button>
+        <button type="button" class="btn btn-light-glass" data-bs-dismiss="modal" id="sendCancel">Cancel</button>
+        <button type="button" class="btn btn-teal" id="sendGo">Send</button>
+        <button type="button" class="btn btn-teal" id="sendDone" hidden>Close</button>
       </div>
     </div>
   </div>
 </div>
+{% endblock %}
 
-<div class="modal fade" id="markPaidModal" tabindex="-1" aria-labelledby="markPaidLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <form method="POST" id="markPaidForm">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="markPaidLabel">Mark invoice as paid</h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body d-grid gap-2">
-          <input type="hidden" name="status" value="paid">
-          <input type="hidden" name="return_student_id" id="retStudent">
-          <input type="hidden" name="return_start_date" id="retStart">
-          <input type="hidden" name="return_end_date" id="retEnd">
-          <input type="hidden" name="return_status" id="retStatus">
-          <input type="hidden" name="return_term" id="retTerm">
-          <input type="hidden" name="return_year" id="retYear">
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('tr[data-href]').forEach((tr) => tr.addEventListener('click', (e) => {
+    if (!e.target.closest('a')) window.location = tr.dataset.href;
+  }));
 
-          <label class="form-label m-0">Amount</label>
-          <input type="number" step="0.01" name="paid_amount" class="form-control" placeholder="e.g. 45.00">
+  const open = document.getElementById('send-drafts');
+  if (!open) return;
+  const ids = open.dataset.ids.split(','), total = Number(open.dataset.total);
+  const modal = new bootstrap.Modal(document.getElementById('sendModal'));
+  const $ = (id) => document.getElementById(id);
+  const money = (c) => '$' + (c / 100).toLocaleString('en-NZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-          <label class="form-label m-0">Reference</label>
-          <input type="text" name="paid_ref" class="form-control" placeholder="Bank statement ref">
+  open.addEventListener('click', () => {
+    $('sendQuestion').textContent = `Email ${ids.length} invoice${ids.length === 1 ? '' : 's'} totalling ${money(total)}?`;
+    $('sendGo').textContent = `Send ${ids.length}`;
+    modal.show();
+  });
 
-          <label class="form-label m-0">Paid at (optional)</label>
-          <input type="datetime-local" name="paid_at" class="form-control">
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-success">Save</button>
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
-
-<div class="modal fade" id="voidModal" tabindex="-1" aria-labelledby="voidLabel" aria-hidden="true">
-  <div class="modal-dialog">
-    <form method="POST" id="voidForm">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h5 class="modal-title" id="voidLabel">Void invoice <span id="voidNumber"></span></h5>
-          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-        </div>
-        <div class="modal-body d-grid gap-2">
-          <p class="m-0">It stays in the list for your records, but can't be emailed or marked paid. You can restore it later.</p>
-          <label class="form-label m-0" for="voidReason">Reason (optional)</label>
-          <input type="text" name="void_reason" id="voidReason" class="form-control" placeholder="e.g. Replaced by INV26-0113">
-          <input type="hidden" name="return_student_id" id="void-return-student">
-          <input type="hidden" name="return_start_date" id="void-return-start">
-          <input type="hidden" name="return_end_date" id="void-return-end">
-          <input type="hidden" name="return_status" id="void-return-status">
-          <input type="hidden" name="return_term" id="void-return-term">
-          <input type="hidden" name="return_year" id="void-return-year">
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-danger">Void invoice</button>
-          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-        </div>
-      </div>
-    </form>
-  </div>
-</div>
+  // One invoice per request, so a long batch can't time out part-way; stop at once if Gmail isn't connected.
+  $('sendGo').addEventListener('click', async () => {
+    $('sendAsk').hidden = true; $('sendProgress').hidden = false;
+    $('sendGo').hidden = true; $('sendCancel').hidden = true;
+    const counts = { sent: 0, notSent: 0, failed: 0 };
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+    const line = (symbol, text) => { const li = document.createElement('li'); li.textContent = `${symbol} ${text}`; $('sendLog').appendChild(li); };
+    let stopped = '';
+    for (let i = 0; i < ids.length; i++) {
+      $('sendText').textContent = `Sending ${i + 1} of ${ids.length}…`;
+      let r, j;
+      try { r = await fetch("{{ url_for('invoices_bp.send', invoice_id=999999999) }}".replace('999999999', ids[i]), { method: 'POST', headers: { 'X-Requested-With': 'fetch' } }); }
+      catch (err) { stopped = 'The app couldn’t be reached, so sending stopped. Check which invoices show as sent before sending the rest.'; break; }
+      try { j = await r.json(); } catch (err) { j = { status: 'failed', message: `Invoice ${ids[i]}: the app hit an error (${r.status}).` }; }
+      if (j.status === 'gmail_not_connected') { stopped = j.message; break; }
+      if (j.status === 'sent') { counts.sent++; line('✓', j.message); }
+      else if (j.status === 'failed') { counts.failed++; line('✗', j.message); }
+      else { counts.notSent++; line('–', j.message); }
+      $('sendBar').style.width = `${Math.round((i + 1) / ids.length * 100)}%`;
+    }
+    window.removeEventListener('beforeunload', warn);
+    const summary = `Emailed: ${counts.sent}, Not sent: ${counts.notSent}, Failed: ${counts.failed}`;
+    $('sendText').textContent = (stopped ? 'Stopped. ' : 'Finished. ') + summary;
+    if (stopped) { $('sendStop').textContent = stopped; $('sendStop').hidden = false; }
+    $('sendDone').hidden = false; $('sendDone').focus();
+  });
+  $('sendDone').addEventListener('click', () => window.location.reload());
+});
+</script>
 {% endblock %}

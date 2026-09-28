@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block content %}
+{% set setting_up = not (term and term.started_at) %}
+<div class="page-head">
+  <div>
+    <p class="eyebrow on-glass mb-1">{{ 'Get the term ready' if setting_up else 'Change the term' }}</p>
+    <h2 class="page-title">{{ 'Start' if setting_up else 'Change' }} {{ name }}</h2>
+    <p class="page-sub">Check the dates, the days off and everyone’s regular lesson. Nothing changes until you press {{ 'Start' if setting_up else 'Save' }}.</p>
+  </div>
+  <div class="tools">
+    {% if term %}<a class="btn btn-sm btn-light-glass" href="{{ url_for('register_bp.register', term=term.id) }}">← {{ term.name }} register</a>{% endif %}
+  </div>
+</div>
+
+{% if problems %}
+<div class="alert alert-warning">{% for p in problems %}<div>{{ p }}</div>{% endfor %}</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('register_bp.start_term') }}" id="termForm">
+  {% if term %}<input type="hidden" name="term" value="{{ term.id }}">{% endif %}
+
+  <section class="panel" aria-labelledby="dates-h">
+    <h3 id="dates-h" class="h5">1. Dates</h3>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-4"><label class="form-label" for="t-name">Name</label><input id="t-name" type="text" name="name" value="{{ name }}" class="form-control" required></div>
+      <div class="col-md-3"><label class="form-label" for="t-start">First day</label><input id="t-start" type="date" name="start" value="{{ start.isoformat() }}" class="form-control" required></div>
+      <div class="col-md-3"><label class="form-label" for="t-end">Last day</label><input id="t-end" type="date" name="end" value="{{ end.isoformat() }}" class="form-control" required></div>
+      <div class="col-md-2"><p class="mb-2"><b>{{ weeks }} weeks</b></p></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="off-h">
+    <h3 id="off-h" class="h5">2. Days off during the term</h3>
+    <p class="hint mb-2">Lessons on a ticked day are marked as a holiday, with no charge.</p>
+    {% for h in holiday_rows %}
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="hol_{{ h.iso }}" value="1" id="hol-{{ h.iso }}"{{ ' checked' if h.on }}>
+      <input type="hidden" name="holname_{{ h.iso }}" value="{{ h.name }}">
+      <label class="form-check-label" for="hol-{{ h.iso }}">{{ fmt_long(h.date) }}: {{ h.name }}</label>
+    </div>
+    {% else %}
+    <p class="mb-2">No public holidays fall in these dates.</p>
+    {% endfor %}
+    <p class="fw-bold mt-3 mb-1">Another day off (e.g. you’re away)</p>
+    {% for i in range(2) %}
+    <div class="row g-2 mb-2">
+      <div class="col-sm-4"><label class="visually-hidden" for="x-date-{{ i }}">Date</label><input id="x-date-{{ i }}" type="date" name="extra_date_{{ i }}" class="form-control"></div>
+      <div class="col-sm-8"><label class="visually-hidden" for="x-name-{{ i }}">What it is</label><input id="x-name-{{ i }}" type="text" name="extra_name_{{ i }}" class="form-control" placeholder="What it is, e.g. Away at a workshop"></div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="panel" aria-labelledby="students-h">
+    <h3 id="students-h" class="h5">3. Everyone’s regular lesson</h3>
+    <p class="hint mb-2">Ticked students get a lesson every week of the term. Change a rate here for a family paying less (it’s per hour).
+      Students marked <span class="chip chip-ok">entered</span> already have this term’s lessons: they stay as they are, but a new rate applies to them.</p>
+    <div class="table-responsive">
+      <table class="table table-sm align-middle mb-0 term-students">
+        <thead><tr><th scope="col">Lessons</th><th scope="col">Student</th><th scope="col">Day</th><th scope="col">Time</th><th scope="col">Minutes</th><th scope="col">$ / hour</th></tr></thead>
+        <tbody>
+          {% for r in rows %}
+          <tr class="{{ 'table-light' if r.existing }}">
+            <td>
+              {% if r.existing %}<span class="chip chip-ok" title="Already entered">{{ r.existing }} entered</span>
+              {% else %}<input class="form-check-input" type="checkbox" name="include_{{ r.id }}" value="1" id="inc-{{ r.id }}" aria-label="Weekly lessons for {{ r.name }}"{{ ' checked' if r.include }}>{% endif %}
+            </td>
+            <td><label for="{{ 'inc-' ~ r.id if not r.existing else 'day-' ~ r.id }}" class="fw-bold mb-0">{{ r.name }}</label>
+              {% if not r.existing and not r.valid %}<small class="d-block text-danger">Choose a day, time, length and rate.</small>{% endif %}</td>
+            <td><select id="day-{{ r.id }}" name="day_{{ r.id }}" class="form-select form-select-sm" aria-label="Day for {{ r.name }}">
+                <option value=""{{ ' selected' if not r.day }}>—</option>
+                {% for d in day_names %}<option value="{{ loop.index }}"{{ ' selected' if r.day == loop.index }}>{{ d }}</option>{% endfor %}</select></td>
+            <td><input type="time" name="time_{{ r.id }}" value="{{ r.time }}" step="300" class="form-control form-control-sm" aria-label="Time for {{ r.name }}"></td>
+            <td><input type="number" name="minutes_{{ r.id }}" value="{{ r.minutes }}" min="5" max="240" class="form-control form-control-sm" aria-label="Minutes for {{ r.name }}"></td>
+            <td><input type="number" name="rate_{{ r.id }}" value="{{ r.rate }}" min="0" step="0.5" class="form-control form-control-sm" aria-label="Rate per hour for {{ r.name }}"></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="6">No students yet. Add them on the Students page first.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel good" id="plan" aria-labelledby="plan-h" aria-live="polite">
+    <h3 id="plan-h" class="h5">What {{ 'starting' if setting_up else 'saving' }} {{ name }} will do</h3>
+    <p class="stale-note mb-2" hidden><b>You’ve changed something:</b> press <b>Check what it will do</b> to update this.</p>
+    <ul class="mb-2">
+      <li>Add <b>{{ plan.new_lessons }} lesson{{ 's' if plan.new_lessons != 1 }}</b> for {{ plan.students }} student{{ 's' if plan.students != 1 }}, from {{ fmt_long(start) }} to {{ fmt_long(end) }}.</li>
+      {% if plan.on_holidays %}<li>Mark {{ plan.on_holidays }} lesson{{ 's' if plan.on_holidays != 1 }} on days off as holidays, with no charge.</li>{% endif %}
+      {% if plan.already %}<li>Keep the lessons already entered for {{ plan.already|length }} student{{ 's' if plan.already|length != 1 }}.</li>{% endif %}
+    </ul>
+    {% if plan.after %}
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="drop_after" value="1" id="drop-after"{{ ' checked' if drop_after }}>
+      <label class="form-check-label" for="drop-after">Also delete the <b>{{ plan.after }} lesson{{ 's' if plan.after != 1 }}</b> entered after the last day
+        ({{ fmt_dm(plan.after_from) }}{{ ' to ' ~ fmt_dm(plan.after_to) if plan.after_to != plan.after_from }})</label>
+    </div>
+    <p class="hint mb-0">These are usually left over from repeating weeks. Leave it unticked if they’re real lessons in the holidays: they’ll be charged on the {{ name }} invoices.</p>
+    {% endif %}
+  </section>
+
+  <div class="d-flex flex-wrap gap-2 mt-3 justify-content-end">
+    <button class="btn btn-light-glass btn-lg" type="submit" name="action" value="preview">Check what it will do</button>
+    <button class="btn btn-teal btn-lg" type="submit" name="action" value="start">{{ 'Start ' ~ name if setting_up else 'Save changes' }}</button>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // The summary is worked out by the server; say when it no longer matches what's on the page.
+  const form = document.getElementById('termForm'), note = document.querySelector('#plan .stale-note');
+  form.addEventListener('input', (e) => { if (e.target.name !== 'drop_after') note.hidden = false; });
+  {% if previewed %}document.getElementById('plan').scrollIntoView({ block: 'center' });{% endif %}
+});
+</script>
+{% endblock %}

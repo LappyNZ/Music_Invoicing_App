@@ -172,3 +172,154 @@
 body.modal-open .glass {
   pointer-events: none;
 }
+/* ---------------- The term workflow ----------------
+   The photo and glass stay; busy content sits on light cards on the glass, so it's easy to read. */
+.main-nav .nav-link { border-radius: 8px; padding: 8px 12px; font-weight: 600; }
+.main-nav .nav-link.active { background: rgba(255, 255, 255, 0.18); }
+.page-title { color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); font-weight: 700; margin: 0; }
+.page-sub { color: rgba(255, 255, 255, 0.95); text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); margin: 4px 0 0; }
+.on-glass { color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8); }
+.eyebrow { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.page-head { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 20px; margin-bottom: 18px; }
+.page-head .tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+.panel { background: rgba(255, 255, 255, 0.93); color: #1d211e; border-radius: 12px; padding: 16px 18px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.18); }
+.panel + .panel { margin-top: 12px; }
+.glass .panel h2, .glass .panel h3, .glass .panel h4, .glass .panel label, .glass .panel .form-label { color: #1d211e; text-shadow: none; }
+.glass .panel .form-check-label { color: #1d211e; text-shadow: none; }
+.panel .muted, .panel .hint, .muted-dark { color: #5b605a; }
+.hint { font-size: 0.92rem; }
+.panel.next-step { border-left: 6px solid #0d5c63; display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; justify-content: space-between; }
+.panel.warn { background: rgba(250, 233, 204, 0.97); }
+.panel.good { background: rgba(223, 239, 227, 0.97); }
+
+.btn-teal { background: rgba(13, 92, 99, 0.95); color: #fff; }
+.btn-teal:hover, .btn-teal:focus { color: #fff; }
+.btn-light-glass { background: rgba(255, 255, 255, 0.9); color: #1d211e; }
+.btn-link-dark { color: #0d5c63; font-weight: 600; background: none; box-shadow: none; padding: 4px 8px; }
+.btn-link-dark:hover { text-decoration: underline; box-shadow: none; }
+.btn-link-danger { color: #9e2d27; font-weight: 600; background: none; box-shadow: none; padding: 4px 8px; }
+
+.chip { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.85rem; font-weight: 600; background: #e6e9e3; color: #4f554e; white-space: nowrap; }
+.chip-ok { background: #dfefe3; color: #276b3a; }
+.chip-warn { background: #fae9cc; color: #8a4f00; }
+.chip-bad { background: #f6dedb; color: #9e2d27; }
+.chip-accent { background: #dbecec; color: #0d5c63; }
+.chip-extra { background: #e3e6f7; color: #39469a; }
+
+/* Home */
+.steps-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 14px 0 18px; }
+@media (max-width: 768px) { .steps-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.step-card { display: block; text-decoration: none; color: #1d211e; background: rgba(255, 255, 255, 0.9); border-radius: 12px; padding: 10px 14px; }
+.step-card:hover { color: #1d211e; background: #fff; }
+.step-card.done { background: rgba(223, 239, 227, 0.96); }
+.step-card small { display: flex; justify-content: space-between; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #5b605a; font-size: 0.74rem; }
+.step-card b { display: block; font-size: 1.02rem; }
+.mini-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.mini-list li { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid #e1e5de; }
+.mini-list li:first-child { border-top: 0; }
+.mini-list .who { flex: 1; min-width: 0; }
+.mini-list .who small { display: block; color: #5b605a; }
+
+/* Register */
+.week-strip { display: flex; gap: 6px; overflow-x: auto; padding: 3px 2px; margin-bottom: 14px; }
+.week-strip a { flex: none; min-width: 62px; text-align: center; text-decoration: none; background: rgba(255, 255, 255, 0.9); color: #1d211e; border-radius: 10px; padding: 4px 8px; line-height: 1.2; border: 2px solid transparent; font-weight: 700; }
+.week-strip a small { display: block; font-size: 0.72rem; color: #5b605a; font-weight: 400; }
+.week-strip a.checked { background: rgba(223, 239, 227, 0.97); }
+.week-strip a.checked::after { content: " ✓"; color: #276b3a; }
+.week-strip a.current { border-color: #0d5c63; }
+.week-strip a.hols { background: rgba(230, 233, 227, 0.9); font-style: italic; }
+.day-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 4px; }
+.day-head h3 { margin: 0 auto 0 0; font-size: 1.1rem; }
+.lesson-row { display: grid; grid-template-columns: 5.4rem minmax(0, 1fr) minmax(0, 23rem) auto; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid #e1e5de; }
+.lesson-row .time { font-weight: 700; font-variant-numeric: tabular-nums; }
+.lesson-row .who b { display: block; }
+.lesson-row .who small { color: #5b605a; }
+.lesson-row:target { background: rgba(219, 236, 236, 0.7); border-radius: 8px; }
+@media (max-width: 720px) {
+  .lesson-row { grid-template-columns: 4.6rem minmax(0, 1fr) auto; }
+  .lesson-row .status3, .lesson-row .holiday-tag { grid-column: 1 / -1; grid-row: 2; }
+}
+.status3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.status3 button { min-height: 48px; border: 1px solid #b3bab0; background: #fff; border-radius: 10px; font-weight: 700; line-height: 1.1; padding: 5px 4px; color: #1d211e; font-size: 0.95rem; }
+.status3 button small { display: block; font-weight: 400; font-size: 0.74rem; color: #5b605a; }
+.status3 button[aria-pressed="true"][value="taught"] { background: #dfefe3; border-color: #276b3a; color: #276b3a; }
+.status3 button[aria-pressed="true"][value="cancelled"] { background: #e6e9e3; border-color: #5e655d; color: #4f554e; }
+.status3 button[aria-pressed="true"][value="missed"] { background: #fae9cc; border-color: #8a4f00; color: #8a4f00; }
+.status3 button[aria-pressed="true"] small { color: inherit; }
+.holiday-tag { color: #4f554e; font-weight: 700; padding: 10px; border-radius: 10px; background: repeating-linear-gradient(135deg, #e6e9e3 0 8px, #ffffff 8px 16px); text-align: center; }
+.icon-btn { border: 1px solid #b3bab0; background: #fff; border-radius: 10px; width: 44px; height: 44px; color: #1d211e; }
+.week-done { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.grid-wrap { overflow-x: auto; background: rgba(255, 255, 255, 0.94); border-radius: 12px; }
+table.reg-grid { border-collapse: separate; border-spacing: 0; width: 100%; color: #1d211e; }
+.reg-grid th, .reg-grid td { padding: 5px; border-bottom: 1px solid #e1e5de; text-align: center; vertical-align: middle; }
+.reg-grid thead th { font-size: 0.78rem; color: #5b605a; white-space: nowrap; }
+.reg-grid thead th.checked { color: #276b3a; }
+.reg-grid .sticky { position: sticky; left: 0; background: #fff; text-align: left; z-index: 1; min-width: 10.5rem; padding-left: 12px; }
+.reg-grid tbody th small { display: block; color: #5b605a; font-weight: 400; font-size: 0.78rem; white-space: nowrap; }
+.reg-grid .money { text-align: right; padding-right: 12px; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cell { width: 44px; height: 40px; border-radius: 9px; border: 1px solid #d5dad2; background: #fff; font-weight: 700; color: #276b3a; position: relative; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+.cell.st-cancelled { background: #e6e9e3; color: #4f554e; }
+.cell.st-missed { background: #fae9cc; color: #8a4f00; border-color: #8a4f00; }
+.cell.st-holiday { background: repeating-linear-gradient(135deg, #e6e9e3 0 6px, #ffffff 6px 12px); color: #5b605a; font-size: 0.75rem; }
+.cell.unchecked { border-style: dashed; border-color: #9aa198; }
+.cell.many { background: #e3e6f7; color: #39469a; }
+.cell .plus { position: absolute; top: -7px; right: -7px; background: #39469a; color: #fff; font-size: 0.68rem; border-radius: 999px; padding: 0 5px; line-height: 1.5; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 10px; font-size: 0.9rem; }
+
+/* Invoices */
+.inv-table td, .inv-table th { vertical-align: middle; }
+.inv-table tr.clickable { cursor: pointer; }
+.inv-table .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lines { list-style: none; margin: 8px 0 0; padding: 0; border: 1px solid #dfe3dc; border-radius: 12px; background: #fff; }
+.lines li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 7px 12px; border-top: 1px solid #e8ebe5; }
+.lines li:first-child { border-top: 0; }
+.lines .amt { font-weight: 700; text-align: right; min-width: 5.5rem; font-variant-numeric: tabular-nums; }
+.lines li.k-cancelled { color: #5b605a; }
+.lines li.k-cancelled .amt { font-weight: 400; }
+.lines li.total { font-weight: 700; background: #f3f5f1; border-radius: 0 0 12px 12px; }
+.money-box { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.money-box div { background: #f3f5f1; border-radius: 10px; padding: 8px 12px; }
+.money-box b { display: block; font-size: 1.2rem; font-variant-numeric: tabular-nums; }
+.money-box span { color: #5b605a; font-size: 0.86rem; }
+.inv-tabs .nav-link { color: #fff; font-weight: 600; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
+.inv-tabs .nav-link.active { color: #1d211e; text-shadow: none; }
+.paper { background: #fff; color: #1a1e1b; border-radius: 4px; padding: 24px; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25); font-size: 0.88rem; }
+.paper .p-top { display: flex; gap: 14px; align-items: flex-start; border-bottom: 2px solid #1a1e1b; padding-bottom: 12px; }
+.paper .p-top img { width: 72px; height: 72px; }
+.paper .p-title { margin-left: auto; text-align: right; font-weight: 700; font-size: 1.15rem; }
+.paper .p-title span { display: block; font-weight: 400; font-size: 0.85rem; }
+.paper .p-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+.paper .p-meta b { display: block; font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: #5b605a; }
+.paper table { width: 100%; border-collapse: collapse; }
+.paper th { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: #5b605a; border-bottom: 1px solid #1a1e1b; text-align: left; padding: 5px 0; }
+.paper td { padding: 4px 0; border-bottom: 1px solid #e3e6e0; vertical-align: top; }
+.paper td:last-child, .paper th:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.paper tr.nc td { color: #6b716a; }
+.paper tfoot td { font-weight: 700; border-bottom: 0; padding-top: 8px; font-size: 1rem; }
+.paper .p-pay { margin-top: 12px; background: #f1f3ef; border-radius: 6px; padding: 10px 12px; }
+pre.email-text { white-space: pre-wrap; word-break: break-word; font: inherit; }
+.history { list-style: none; margin: 0; padding: 0; }
+.history li { display: grid; grid-template-columns: 9rem 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid #e1e5de; }
+.history li:first-child { border-top: 0; }
+.history time { color: #5b605a; font-variant-numeric: tabular-nums; }
+.progress-send { height: 12px; }
+.send-log { list-style: none; margin: 10px 0 0; padding: 0; max-height: 260px; overflow: auto; }
+.send-log li { padding: 4px 0; border-top: 1px solid rgba(255, 255, 255, 0.25); }
+
+/* Form controls on the light cards: the glass styles above are for fields sitting on the photo */
+.glass .panel input:not([type="checkbox"]):not([type="radio"]), .glass .panel select, .glass .panel textarea { background: #fff; border: 1px solid #b3bab0; }
+.glass .form-check-input, .glass .form-check-input:focus, .modal-content .form-check-input, .modal-content .form-check-input:focus {
+  padding: 0; width: 1.15em; height: 1.15em; background-color: #fff; background-image: var(--bs-form-check-bg-image);
+  background-repeat: no-repeat; background-position: center; background-size: contain; border: 1px solid #5b605a; border-radius: 0.25em;
+}
+.glass .form-check-input:checked, .modal-content .form-check-input:checked { background-color: #0d5c63; border-color: #0d5c63; }
+.form-check-label { cursor: pointer; }
+.page-title .chip { text-shadow: none; }
+.term-students select { min-width: 8.5rem; }
+@media (max-width: 576px) {
+  .lines li { grid-template-columns: minmax(0, 1fr) auto; }
+  .lines li > :nth-child(3) { grid-column: 1 / -1; justify-self: end; margin-top: -6px; }
+  .lines li > :nth-child(3):empty { display: none; }
+}
+@media (max-width: 576px) { .money-box { gap: 6px; } .money-box div { padding: 6px 8px; } .money-box b { font-size: 1rem; } }

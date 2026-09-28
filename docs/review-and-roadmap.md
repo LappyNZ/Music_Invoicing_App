@@ -2,7 +2,7 @@
 
 *Reviewed September 2026 against `main` @ `32d6a47`. The repo history starts at "Initial public release" (12 Apr 2026), followed by the GHCR workflow (13 Apr 2026). Updated after comparing with a copy of the Unraid server folder ([§2](#2-what-is-running-on-unraid-resolved)).*
 
-Contents: [1 Summary](#1-summary) · [Status](#status-27-september-2026) · [2 What is running on Unraid](#2-what-is-running-on-unraid-resolved) · [3 Invoicing this week?](#3-invoicing-this-week-work-around-the-bugs-like-this) · [4 Confirmed bugs](#4-confirmed-bugs) · [5 Root causes](#5-structural-issues-root-causes) · [6 What's good](#6-whats-good-keep-it) · [7 UX proposal](#7-ux-proposal-organise-the-app-around-the-term) · [8 Roadmap](#8-roadmap) · [9 Decisions needed](#9-decisions-needed) · [Appendices](#appendix-a-proposed-data-model)
+Contents: [1 Summary](#1-summary) · [Status](#status-28-september-2026) · [2 What is running on Unraid](#2-what-is-running-on-unraid-resolved) · [3 Invoicing this week?](#3-invoicing-this-week-work-around-the-bugs-like-this) · [4 Confirmed bugs](#4-confirmed-bugs) · [5 Root causes](#5-structural-issues-root-causes) · [6 What's good](#6-whats-good-keep-it) · [7 UX proposal](#7-ux-proposal-organise-the-app-around-the-term) · [8 Roadmap](#8-roadmap) · [9 Decisions needed](#9-decisions-needed) · [Appendices](#appendix-a-proposed-data-model)
 
 ---
 
@@ -18,7 +18,40 @@ Contents: [1 Summary](#1-summary) · [Status](#status-27-september-2026) · [2 W
 
 ---
 
-## Status (27 September 2026)
+## Status (28 September 2026)
+
+**Phase 2's term workflow is built** and ready for Term 3 2026 invoicing. How to use it the first time is in
+[deploy/unraid/README.md](../deploy/unraid/README.md#first-use-of-the-term-register-term-3-2026).
+
+- **Home** says what to do next (check the register, make the invoices, send them, get the next term ready),
+  with the term's four steps and who hasn't paid.
+- **Register:** week by week (a strip of weeks, lessons grouped by day), or the whole term as a grid.
+  Every lesson starts as *Had lesson*; *Cancelled* is no charge and *Missed* is still charged. Extra and
+  makeup lessons can be added and changed afterwards. Each week is ticked off when it matches the diary,
+  and the school holidays after a term show as a *Hol* week.
+- **Start a term:** dates, days off (known public holidays are suggested, Show Day included), and each
+  student's regular lesson and hourly rate, so a family paying less gets a lower rate. It fills the register
+  for the term. Lessons already entered are kept, and leftovers after the last day can be deleted.
+- **Invoices made from the register** in one go, one per student or per family (students sharing an email),
+  and stored line by line: which lessons, which items. Extras show at a glance on the list. A draft follows
+  the register until it's sent. Items and discounts can be added, the email wording changed for one invoice,
+  and **Email me a copy first** shows exactly what a family gets.
+- **The PDF** has the logo, the bill-to parent, "Prompt payment is appreciated" (no due date), and the payment
+  Reference and Particulars. The business name shows if `BUSINESS_NAME` is set.
+- **After sending:**
+  - payments (part or full, several per invoice);
+  - **Correct and resend** when the register changes after sending (the invoice says what changed);
+    the corrected invoice keeps its number and says it replaces the earlier one;
+  - **Move what's owing to the next invoice**, write off, void, and undo;
+  - a history of every version sent and everything that happened.
+- **Existing data:** the upgrade links lessons to the old invoices that billed them (by their dates), works out
+  each student's regular lesson from their recent lessons, and turns recorded payments into the new payments.
+  Old invoices keep their total and PDF.
+- **Tested:** 154 automated tests, a click-through in Chromium of a whole term on made-up data, and a rehearsal
+  on a copy of the live database: the upgrade, every page, making the Term 3 drafts, and starting Term 4.
+
+**Still to do in Phase 2:** logins and CSRF protection (2.7, B20). Until then the app should only be reachable
+on the home network.
 
 **Phase 1 is done**, in two updates. Each goes live on the server with `update.sh` once merged
 ([deploy/unraid/README.md](../deploy/unraid/README.md)).
@@ -72,7 +105,7 @@ Contents: [1 Summary](#1-summary) · [Status](#status-27-september-2026) · [2 W
 - **Rehearsed** in Docker on a copy of the live database: the upgrade, bringing back deleted students, sending
   with Gmail disconnected, and rolling back to the previous version.
 
-**Next:** Phase 2. B20 (security) was always part of it (2.7).
+**Next:** the rest of Phase 2 (2.7, security), then Phase 3 or 4.
 
 ---
 
@@ -254,14 +287,14 @@ Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a
 - 1.11 ✅ **Data clean-up migration:** repair unreadable lesson times, normalise `paid_at` formats, and show invoices of deleted students again, with a tool to bring those students back as archived (B4, B8, B10).
 
 ### Phase 2: Term-based workflow (L): the big UX improvement
-- 2.1 **Data model:** terms (seeded 2026–27), each student's regular slot, rate, active flag and billing contact(s), lesson status, `invoice_lines`, and money in cents ([Appendix A](#appendix-a-proposed-data-model)).
-- 2.2 **Start term:** creates the expected lessons from regular slots, optionally skipping public holidays.
-- 2.3 **Register grid:** click to cycle a lesson's status, with live totals. Probably [htmx](https://htmx.org), so cells update without reloading the page.
-- 2.4 **Drafts:** generate drafts for all students; review and edit them; regenerate PDFs automatically. The PDF should show the bill-to parent, a due date and the business name.
-- 2.5 **After sending:** revisions, credits and void; *Resend*; an email log.
-- 2.6 **Look and feel:** home dashboard, new navigation, visual refresh (labels, contrast, bigger targets).
+- 2.1 ✅ **Data model:** terms (Terms 3 and 4 2026 to start with; later ones are added by *Start a term*), each student's regular lesson and rate, lesson status and kind, invoice items and the lines as sent (`invoice_versions`), payments, an event log, and money in cents.
+- 2.2 ✅ **Start term:** creates the term's lessons from regular lessons, skipping the days off chosen.
+- 2.3 ✅ **Register:** week by week, plus the whole-term grid (click to cycle a lesson's status, with totals). Plain JavaScript updates a lesson in place; every button also works without it.
+- 2.4 ✅ **Drafts:** made for all students at once (or one per family); items, discounts and the email wording can be changed; the PDF is made from the lines. The PDF shows the bill-to parent, the logo, "Prompt payment is appreciated" instead of a due date, and the business name if set.
+- 2.5 ✅ **After sending:** corrections (same number, marked as corrected), amounts owing moved to the next invoice, write-offs, void and undo; *Email it again*; a history of versions and events.
+- 2.6 ✅ **Look and feel:** Home, new navigation (Home · Register · Invoices · Students), light cards on the photo and glass, labels on every field, big buttons.
 - 2.7 **Security:** a login for each of you, plus CSRF protection (B20).
-- **Existing data:** old invoices keep their total and PDF as "legacy" invoices without lines; past lessons become "taught".
+- ✅ **Existing data:** old invoices keep their total and PDF without lines; past lessons stay as taught and are linked to the invoices that billed them.
 
 ### Phase 3: Instruments and rentals (M)
 - 3.1 **Inventory:** code, size (1/10 to 4/4), maker, serial number, value, condition, status (available, rented, in repair, retired), optional photo.
@@ -289,9 +322,9 @@ Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a
 ## 9. Decisions needed
 
 1. ~~**Unraid check**~~: answered. The server runs this repo's code ([§2](#2-what-is-running-on-unraid-resolved)).
-2. **Siblings:** the data shows very few families with more than one student, so one invoice per student looks fine. Say so if you'd prefer family invoices.
-3. **Billing rules:** the data shows you invoice at the end of each term (in arrears), which the register design fits. Still open: which absences are charged (e.g. short notice)? How are makeup lessons handled? Are lessons that fall in the school holidays real (e.g. makeups to bill) or leftovers from *Weeks Repeating*?
-4. **Rates:** some students' rates changed partway through the data. Do rates change at a set time (e.g. the start of the year)?
+2. ~~**Siblings**~~: answered. One invoice per student, with a *one invoice per family* option when making a term's invoices (students sharing an email address).
+3. **Billing rules:** you invoice at the end of each term (in arrears). The register leaves the rules to you: each lesson is *Had lesson*, *Cancelled* (no charge) or *Missed* (still charged), and makeups are extra lessons. Lessons in the holidays after a term go on that term's invoice; leftovers from *Weeks Repeating* can be deleted when the next term is started.
+4. ~~**Rates**~~: answered. Each student has their own hourly rate (a family paying less, e.g. with a school subsidy, gets a lower one), set when a term is started or on the Students page.
 5. **Rentals:** are they charged per term or per month? Is there a deposit? Do rentals continue through the holidays?
 6. ~~**Invoice numbers**~~: answered. New invoices use `INV26-0042`; existing ones keep theirs. Payers are asked for **Reference:** the invoice number and **Particulars:** the student's name, in both the email and the PDF. The email signature stays as the sender's name only.
 7. **Email:** does Gmail sending work reliably at the moment, or do you often have to re-authorise?
@@ -302,6 +335,9 @@ Rough sizes, assuming AI-assisted work: **S** is about an evening, **M** about a
 ---
 
 ## Appendix A: proposed data model
+
+*Phase 2 built the term, lesson and invoice parts of this more simply (terms, lesson status, invoice items,
+the lines as sent, payments); `app/db.py` has what's in the database now.*
 
 New tables and columns (`+` means added to an existing table):
 
