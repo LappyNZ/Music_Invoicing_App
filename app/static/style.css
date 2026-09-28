@@ -295,7 +295,6 @@ table.reg-grid { border-collapse: separate; border-spacing: 0; width: 100%; colo
 .paper th { font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: #5b605a; border-bottom: 1px solid #1a1e1b; text-align: left; padding: 5px 0; }
 .paper td { padding: 4px 0; border-bottom: 1px solid #e3e6e0; vertical-align: top; }
 .paper td:last-child, .paper th:last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.paper tr.nc td { color: #6b716a; }
 .paper tfoot td { font-weight: 700; border-bottom: 0; padding-top: 8px; font-size: 1rem; }
 .paper .p-pay { margin-top: 12px; background: #f1f3ef; border-radius: 6px; padding: 10px 12px; }
 pre.email-text { white-space: pre-wrap; word-break: break-word; font: inherit; }

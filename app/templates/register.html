@@ -112,7 +112,8 @@
     <div class="col-md-3"><label class="form-label" for="x-note">Note (optional)</label><input id="x-note" type="text" name="note" class="form-control" placeholder="e.g. makeup for 16 Sep"></div>
     <div class="col-md-1"><button class="btn btn-teal w-100" type="submit">Add</button></div>
   </form>
-  <p class="hint mb-0 mt-2">It’s charged at the student’s usual rate. You can change it afterwards with the pencil button.</p>
+  <p class="hint mb-0 mt-2">It’s charged at the student’s usual rate. You can change it afterwards with the pencil button.
+    If a lesson just moved to another day, use the pencil on that lesson instead.</p>
 </details>
 
 <details class="panel">
@@ -217,7 +218,13 @@
           <div class="col-6"><label class="form-label" for="e-minutes">Minutes</label><input type="number" id="e-minutes" name="minutes" min="5" max="240" class="form-control" required></div>
           <div class="col-6"><label class="form-label" for="e-rate">$ per hour</label><input type="number" id="e-rate" name="rate" min="0" step="0.5" class="form-control" required></div>
           <div class="col-12"><label class="form-label" for="e-note">Note</label><input type="text" id="e-note" name="note" class="form-control" placeholder="e.g. makeup for 16 Sep"></div>
+          <div class="col-12">
+            <input type="hidden" name="kind_field" value="1">
+            <div class="form-check"><input class="form-check-input" type="checkbox" name="extra" value="1" id="e-extra">
+              <label class="form-check-label" for="e-extra">Extra lesson (on top of the regular ones)</label></div>
+          </div>
         </div>
+        <p class="small mt-3 mb-0">Lesson moved to another day or time? Change it here, rather than cancelling it and adding an extra one.</p>
       </div>
       <div class="modal-footer">
         <button type="submit" class="btn btn-danger me-auto" id="deleteLessonBtn" formnovalidate>Delete lesson</button>
@@ -247,6 +254,7 @@ document.addEventListener('DOMContentLoaded', () => {
       billed.textContent = b.billed ? b.billed + '. Changing it changes that invoice.' : '';
       billed.hidden = !b.billed;
       for (const k of ['date', 'time', 'minutes', 'rate', 'note']) document.getElementById('e-' + k).value = b[k];
+      document.getElementById('e-extra').checked = b.kind === 'extra';
       deleting = false;
     });
     document.getElementById('deleteLessonBtn').addEventListener('click', (e) => {

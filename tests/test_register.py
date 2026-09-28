@@ -86,6 +86,26 @@ def test_changing_a_lesson(client, db, term3, student, lesson):
     assert tuple(row) == ("2026-07-22 17:15", 45, 65.0, "moved")
 
 
+def test_an_extra_lesson_can_be_made_a_regular_one_and_back(client, db, term3, student, lesson):
+    lesson_id = lesson(student(), "2026-07-21 17:30", minutes=60, kind="extra")
+    form = {"date": "2026-07-21", "time": "17:30", "minutes": "60", "rate": "70", "term": term3["id"], "week": 1}
+
+    client.post(f"/register/lesson/{lesson_id}/edit", data={**form, "kind_field": "1"})                 # box unticked
+    assert db.execute("SELECT kind FROM lessons WHERE id=?", (lesson_id,)).fetchone()[0] == "regular"
+    client.post(f"/register/lesson/{lesson_id}/edit", data={**form, "kind_field": "1", "extra": "1"})
+    assert db.execute("SELECT kind FROM lessons WHERE id=?", (lesson_id,)).fetchone()[0] == "extra"
+    client.post(f"/register/lesson/{lesson_id}/edit", data=form)                                        # no box: unchanged
+    assert db.execute("SELECT kind FROM lessons WHERE id=?", (lesson_id,)).fetchone()[0] == "extra"
+
+
+def test_the_edit_dialog_offers_the_extra_box_and_says_how_to_move_a_lesson(client, term3, student, lesson):
+    lesson(student(), "2026-07-21 17:30")
+
+    html = page(client, f"/register?term={term3['id']}&week=1")
+
+    assert 'id="e-extra"' in html and "Lesson moved to another day or time? Change it here" in html
+
+
 @pytest.mark.parametrize("field, value", [("date", "22/07/2026"), ("minutes", "half an hour"), ("rate", "nan"), ("minutes", "0")])
 def test_a_change_that_cannot_be_read_changes_nothing(client, db, term3, student, lesson, field, value):
     lesson_id = lesson(student(), "2026-07-21 16:00")
